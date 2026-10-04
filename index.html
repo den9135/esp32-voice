@@ -5,9 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ESP32 Voice to Text Stream</title>
     <style>
-        body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #121212; color: #fff; max-width: 480px; margin: 0 auto; }
+        body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #121212; color: #fff; max-width: 480px; margin: 0 auto; position: relative; }
         .card { background: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
         h2 { margin-top: 0; color: #0a84ff; font-size: 20px; }
+        /* Индикатор обновления кода справа вверху */
+        .version-badge { position: absolute; top: 20px; right: 20px; background: #ff9500; color: #000; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
         button { width: 100%; padding: 14px; margin: 8px 0; border: none; border-radius: 8px; background: #0a84ff; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:disabled { background: #444; cursor: not-allowed; }
         button.recording { background: #ff453a; }
@@ -19,11 +21,12 @@
     </style>
 </head>
 <body>
+    <div class="version-badge">v3.2 (Желтый)</div>
     <div class="card">
         <h2>ESP32 Voice to Text</h2>
 
-        <label for="apiKey">Gemini API Key (вставьте ключ сюда):</label>
-        <input type="password" id="apiKey" placeholder="AIzaSy...">
+        <label for="apiKey">Токен / Ключ проекта (вставьте сюда):</label>
+        <input type="password" id="apiKey" placeholder="AQ...">
 
         <div class="status" id="status">Статус: Отключено</div>
         
@@ -82,7 +85,6 @@
             const dataView = event.target.value;
             const samples = new Int16Array(dataView.buffer, dataView.byteOffset, dataView.byteLength / 2);
 
-            // Анимация зеленой полоски
             if (samples.length > 0) {
                 let sum = 0;
                 for (let i = 0; i < samples.length; i++) {
@@ -102,7 +104,7 @@
         btnRecord.addEventListener('click', () => {
             const apiKey = apiKeyInput.value.trim();
             if (!apiKey) {
-                alert("Сначала вставьте ваш API ключ Gemini в верхнее поле!");
+                alert("Сначала вставьте ваш токен/ключ в верхнее поле!");
                 return;
             }
 
@@ -150,46 +152,19 @@
         }
 
         async function sendToGemini(base64Audio) {
-            let apiKey = apiKeyInput.value.replace(/['"\s\u200B-\u200D\uFEFF]/g, '');
+            let token = apiKeyInput.value.replace(/['"\s\u200B-\u200D\uFEFF]/g, '');
 
-            outputEl.value = "Поиск доступной модели для вашего ключа...";
-            let modelPath = "models/gemini-1.5-flash"; // Резервное значение
+            outputEl.value = "Распознавание через Gemini 1.5 Flash...";
 
-            // 1. Умный поиск доступной модели через API Google
-            try {
-                const modelsRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-                const modelsData = await modelsRes.json();
-                
-                if (modelsData.models) {
-                    const validModels = modelsData.models.filter(m => 
-                        m.supportedGenerationMethods &&
-                        m.supportedGenerationMethods.includes("generateContent") &&
-                        (m.name.includes("gemini-1.5") || m.name.includes("gemini-2.0"))
-                    );
-                    
-                    if (validModels.length > 0) {
-                        modelPath = validModels[0].name; // Выбираем первую рабочую модель (например, models/gemini-1.5-flash-001)
-                    } else {
-                        outputEl.value = "Ошибка: Ваш ключ не имеет доступа к мультимодальным моделям Gemini. Проверьте Google AI Studio.";
-                        return;
-                    }
-                } else if (modelsData.error) {
-                    outputEl.value = "Ошибка API ключа: " + modelsData.error.message;
-                    return;
-                }
-            } catch (e) {
-                console.log("Не удалось запросить список моделей, пробуем стандартную...");
-            }
-
-            outputEl.value = `Распознавание через ${modelPath.split('/')[1]}...`;
-
-            // 2. Отправка аудио с правильным синтаксисом (inlineData и mimeType)
-            const url = `https://generativelanguage.googleapis.com/v1beta/${modelPath}:generateContent?key=${apiKey}`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`;
 
             try {
                 const response = await fetch(url, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
                     body: JSON.stringify({
                         contents: [{
                             parts: [
@@ -205,7 +180,7 @@
                 if (response.ok && result.candidates && result.candidates[0]?.content?.parts?.[0]?.text) {
                     outputEl.value = result.candidates[0].content.parts[0].text;
                 } else {
-                    outputEl.value = "Ошибка Gemini API:\n" + (result.error?.message || JSON.stringify(result));
+                    outputEl.value = "Ошибка API:\n" + (result.error?.message || JSON.stringify(result));
                 }
             } catch (err) {
                 outputEl.value = "Сетевая ошибка: " + err.message;
