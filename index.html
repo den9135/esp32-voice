@@ -8,12 +8,12 @@
         body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #121212; color: #fff; max-width: 480px; margin: 0 auto; position: relative; }
         .card { background: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
         h2 { margin-top: 0; color: #0a84ff; font-size: 20px; }
-        /* Индикатор обновления кода справа вверху - Зеленый */
-        .version-badge { position: absolute; top: 20px; right: 20px; background: #30d158; color: #000; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        /* Индикатор обновления кода справа вверху - Ярко-синий */
+        .version-badge { position: absolute; top: 20px; right: 20px; background: #0a84ff; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
         button { width: 100%; padding: 14px; margin: 8px 0; border: none; border-radius: 8px; background: #0a84ff; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:disabled { background: #444; cursor: not-allowed; }
         button.recording { background: #ff453a; }
-        .status { font-weight: bold; margin: 10px 0; color: #aaa; }
+        .status { font-weight: bold; margin: 10px 0; color: #aaa; font-size: 14px; word-break: break-all; }
         .meter-bg { background: #333; height: 18px; border-radius: 9px; overflow: hidden; margin: 10px 0; border: 1px solid #444; }
         .meter-fill { background: #30d158; height: 100%; width: 0%; transition: width 0.05s linear; }
         textarea { width: 100%; height: 120px; margin-top: 10px; border-radius: 8px; border: 1px solid #444; background: #2c2c2e; color: #fff; padding: 10px; box-sizing: border-box; font-size: 15px; }
@@ -21,7 +21,7 @@
     </style>
 </head>
 <body>
-    <div class="version-badge">v3.3 (Зеленый)</div>
+    <div class="version-badge">v3.5 (Синий)</div>
     <div class="card">
         <h2>ESP32 Voice to Text</h2>
 
@@ -156,7 +156,6 @@
 
             outputEl.value = "Распознавание через Gemini 1.5 Flash...";
 
-            // Возвращаем стандартную передачу ключа через URL-параметр ?key=
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
             try {
@@ -208,7 +207,7 @@
             for (let i = 0; i < samples.length; i++) {
                 view.setInt16(44 + i * 2, samples[i], true);
             }
-            return new Blob([view], { type: 'audio/wav'}`);
+            return new Blob([view], { type: 'audio/wav' });
         }
 
         function writeString(view, offset, string) {
