@@ -90,11 +90,11 @@
             }
             let avg = sum / pcm16Data.length;
             
-            // Увеличен порог масштабирования до 15000, чтобы шкала не зашкаливала постоянно
             let targetLevel = Math.min(100, Math.max(0, (avg / 15000) * 100));
             smoothedLevel = smoothedLevel + (targetLevel - smoothedLevel) * 0.3;
             meterEl.style.width = smoothedLevel.toFixed(1) + '%';
 
+            // Если идет запись, собираем данные в массив
             if (isRecording) {
                 audioChunks.push(new Int16Array(pcm16Data));
             }
@@ -112,6 +112,12 @@
                 btnRecord.innerText = "2. Начать запись фразы";
                 btnRecord.classList.remove('recording');
                 btnRecord.disabled = true;
+
+                if (audioChunks.length === 0) {
+                    outputEl.value = "Ошибка: Аудиоданные не поступили во время записи.";
+                    btnRecord.disabled = false;
+                    return;
+                }
 
                 outputEl.value = "Обработка и отправка в Gemini...";
                 await processAndTranscribe();
