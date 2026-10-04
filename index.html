@@ -44,6 +44,7 @@
         let bluetoothDevice, txCharacteristic;
         let isRecording = false;
         let audioChunks = [];
+        let smoothedLevel = 0;
 
         const btnConnect = document.getElementById('btnConnect');
         const btnRecord = document.getElementById('btnRecord');
@@ -81,13 +82,18 @@
             const dataView = event.target.value;
             const pcm16Data = new Int16Array(dataView.buffer);
 
+            if (pcm16Data.length === 0) return;
+
             let sum = 0;
             for (let i = 0; i < pcm16Data.length; i++) {
                 sum += Math.abs(pcm16Data[i]);
             }
             let avg = sum / pcm16Data.length;
-            let level = Math.min(100, Math.max(0, (avg / 2000) * 100));
-            meterEl.style.width = level + '%';
+            
+            // Увеличен порог масштабирования до 15000, чтобы шкала не зашкаливала постоянно
+            let targetLevel = Math.min(100, Math.max(0, (avg / 15000) * 100));
+            smoothedLevel = smoothedLevel + (targetLevel - smoothedLevel) * 0.3;
+            meterEl.style.width = smoothedLevel.toFixed(1) + '%';
 
             if (isRecording) {
                 audioChunks.push(new Int16Array(pcm16Data));
