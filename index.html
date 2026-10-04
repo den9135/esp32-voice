@@ -12,6 +12,8 @@
         button:disabled { background: #444; cursor: not-allowed; }
         button.recording { background: #ff453a; }
         .status { font-weight: bold; margin: 10px 0; color: #aaa; }
+        .meter-bg { background: #333; height: 16px; border-radius: 8px; overflow: hidden; margin: 10px 0; }
+        .meter-fill { background: #30d158; height: 100%; width: 0%; transition: width 0.05s; }
         textarea { width: 100%; height: 120px; margin-top: 10px; border-radius: 8px; border: 1px solid #444; background: #2c2c2e; color: #fff; padding: 10px; box-sizing: border-box; font-size: 15px; }
         input[type="password"] { width: 100%; padding: 10px; margin: 5px 0 15px 0; border-radius: 6px; border: 1px solid #444; background: #2c2c2e; color: #fff; box-sizing: border-box; }
     </style>
@@ -22,6 +24,9 @@
         <div class="status" id="status">Статус: Отключено</div>
         
         <button id="btnConnect">1. Подключить ESP32 (BLE)</button>
+        
+        <label>Индикатор звука микрофона:</label>
+        <div class="meter-bg"><div class="meter-fill" id="meter"></div></div>
 
         <label for="apiKey">Gemini API Key:</label>
         <input type="password" id="apiKey" placeholder="Вставьте ваш Gemini API Key">
@@ -40,10 +45,12 @@
         let bluetoothDevice, txCharacteristic, rxCharacteristic;
         let receivedBuffer = [];
         let receivingData = false;
+        let smoothedLevel = 0;
 
         const btnConnect = document.getElementById('btnConnect');
         const btnRecord = document.getElementById('btnRecord');
         const statusEl = document.getElementById('status');
+        const meterEl = document.getElementById('meter');
         const outputEl = document.getElementById('output');
         const apiKeyInput = document.getElementById('apiKey');
 
@@ -77,7 +84,7 @@
         function handleIncomingData(event) {
             const value = event.target.value;
             
-            // Проверяем текстовые маркеры начала/конца передачи
+            // 1. Проверяем маркер начала передачи ("START")
             if (value.byteLength === 5) {
                 const text = new TextDecoder().decode(value);
                 if (text === "START") {
@@ -87,6 +94,8 @@
                     return;
                 }
             }
+            
+            // 2. Проверяем маркер конца передачи ("END")
             if (value.byteLength === 3) {
                 const text = new TextDecoder().decode(value);
                 if (text === "END" && receivingData) {
@@ -97,9 +106,23 @@
                 }
             }
 
-            // Если идет передача — накапливаем чанки
+            // 3. Если идет процесс приема аудиоданных
             if (receivingData) {
-                receivedBuffer.push(new Uint8Array(value.buffer));
+                const chunkBytes = new Uint8Array(value.buffer);
+                receivedBuffer.push(chunkBytes);
+
+                // Вычисляем уровень звука для шевеления индикатора в реальном времени прямо из принимаемых блоков
+                const pcmChunk = new Int16Array(chunkBytes.buffer);
+                if (pcmChunk.length > 0) {
+                    let sum = 0;
+                    for (let i = 0; i < pcmChunk.length; i++) {
+                        sum += Math.abs(pcmChunk[i]);
+                    }
+                    let avg = sum / pcmChunk.length;
+                    let targetLevel = Math.min(100, Math.max(0, (avg / 15000) * 100));
+                    smoothedLevel = smoothedLevel + (targetLevel - smoothedLevel) * 0.3;
+                    meterEl.style.width = smoothedLevel.toFixed(1) + '%';
+                }
             }
         }
 
@@ -111,15 +134,13 @@
             btnRecord.classList.add('recording');
             outputEl.value = "Идет запись на устройстве...";
 
-            // Отправляем команду 'R' плата начнет запись
+            // Отправляем команду 'R' на плату
             const encoder = new TextEncoder();
             await rxCharacteristic.writeValue(encoder.encode('R'));
-
-            // Ждем завершения передачи (палата сама пришлет START -> данные -> END)
         });
 
         async function finishAndSendAudio() {
-            // Соединяем все части в один массив байт
+            // Соединяем все полученные чанки в один непрерывный массив байт
             let totalLength = receivedBuffer.reduce((acc, chunk) => acc + chunk.length, 0);
             let mergedArray = new Uint8Array(totalLength);
             let offset = 0;
@@ -128,10 +149,10 @@
                 offset += chunk.length;
             }
 
-            // Конвертируем в Int16Array сэмплы
+            // Конвертируем в Int16Array
             let pcmSamples = new Int16Array(mergedArray.buffer);
 
-            // Создаем WAV и отправляем в Gemini
+            // Создаем WAV файл и отправляем в Gemini API
             const wavBlob = createWavBlob(pcmSamples, 16000);
             const base64Audio = await blobToBase64(wavBlob);
 
@@ -199,7 +220,7 @@
             return new Blob([view], { type: 'audio/wav' });
         }
 
-        function writeString(view, offset, string) {
+        writeString = function(view, offset, string) {
             for (let i = 0; i < string.length; i++) {
                 view.setUint8(offset + i, string.charCodeAt(i));
             }
