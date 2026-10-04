@@ -152,52 +152,64 @@
         async function sendToGemini(base64Audio) {
             let apiKey = apiKeyInput.value.replace(/['"\s\u200B-\u200D\uFEFF]/g, '');
 
-            // Умный перебор версий API, чтобы избежать ошибки "not found"
-            const candidates = [
-                { model: "gemini-2.5-flash", ver: "v1beta" },
-                { model: "gemini-2.0-flash", ver: "v1beta" },
-                { model: "gemini-1.5-flash", ver: "v1" },
-                { model: "gemini-1.5-flash", ver: "v1beta" }
-            ];
+            outputEl.value = "Поиск доступной модели для вашего ключа...";
+            let modelPath = "models/gemini-1.5-flash"; // Резервное значение
 
-            let lastErrorMessage = "";
-
-            for (const c of candidates) {
-                try {
-                    const url = `https://generativelanguage.googleapis.com/${c.ver}/models/${c.model}:generateContent?key=${apiKey}`;
-
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: [{
-                                parts: [
-                                    { text: "Точно распознай текст из этой аудиозаписи на языке оригинала. Выведи ТОЛЬКО распознанные слова без лишних пояснений." },
-                                    { inline_data: { mime_type: "audio/wav", data: base64Audio } }
-                                ]
-                            }]
-                        })
-                    });
-
-                    const result = await response.json();
-
-                    if (response.ok && result.candidates && result.candidates[0]?.content?.parts?.[0]?.text) {
-                        outputEl.value = result.candidates[0].content.parts[0].text;
+            // 1. Умный поиск доступной модели через API Google
+            try {
+                const modelsRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+                const modelsData = await modelsRes.json();
+                
+                if (modelsData.models) {
+                    const validModels = modelsData.models.filter(m => 
+                        m.supportedGenerationMethods &&
+                        m.supportedGenerationMethods.includes("generateContent") &&
+                        (m.name.includes("gemini-1.5") || m.name.includes("gemini-2.0"))
+                    );
+                    
+                    if (validModels.length > 0) {
+                        modelPath = validModels[0].name; // Выбираем первую рабочую модель (например, models/gemini-1.5-flash-001)
+                    } else {
+                        outputEl.value = "Ошибка: Ваш ключ не имеет доступа к мультимодальным моделям Gemini. Проверьте Google AI Studio.";
                         return;
                     }
-
-                    if (result.error) {
-                        lastErrorMessage = result.error.message;
-                        if (result.error.message.includes("API key not valid")) {
-                            break; // Ключ неверный, дальше перебирать нет смысла
-                        }
-                    }
-                } catch (err) {
-                    lastErrorMessage = err.message;
+                } else if (modelsData.error) {
+                    outputEl.value = "Ошибка API ключа: " + modelsData.error.message;
+                    return;
                 }
+            } catch (e) {
+                console.log("Не удалось запросить список моделей, пробуем стандартную...");
             }
 
-            outputEl.value = "Ошибка Gemini API: " + lastErrorMessage;
+            outputEl.value = `Распознавание через ${modelPath.split('/')[1]}...`;
+
+            // 2. Отправка аудио с правильным синтаксисом (inlineData и mimeType)
+            const url = `https://generativelanguage.googleapis.com/v1beta/${modelPath}:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [
+                                { text: "Точно распознай текст из этой аудиозаписи на языке оригинала. Выведи ТОЛЬКО распознанные слова без лишних пояснений." },
+                                { inlineData: { mimeType: "audio/wav", data: base64Audio } }
+                            ]
+                        }]
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.candidates && result.candidates[0]?.content?.parts?.[0]?.text) {
+                    outputEl.value = result.candidates[0].content.parts[0].text;
+                } else {
+                    outputEl.value = "Ошибка Gemini API:\n" + (result.error?.message || JSON.stringify(result));
+                }
+            } catch (err) {
+                outputEl.value = "Сетевая ошибка: " + err.message;
+            }
         }
 
         function createWavBlob(samples, sampleRate) {
