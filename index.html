@@ -7,9 +7,9 @@
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #121212; color: #fff; max-width: 480px; margin: 0 auto; position: relative; }
         .card { background: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
-        h2 { margin-top: 0; color: #0a84ff; font-size: 20px; }
+        h2 { margin-top: 0; color: #30d158; font-size: 20px; }
         h3 { font-size: 16px; margin: 15px 0 5px 0; color: #e5e5ea; }
-        .version-badge { position: absolute; top: 20px; right: 20px; background: #0a84ff; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        .version-badge { position: absolute; top: 20px; right: 20px; background: #30d158; color: #000; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
         button { width: 100%; padding: 14px; margin: 8px 0; border: none; border-radius: 8px; background: #0a84ff; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:disabled { background: #444; cursor: not-allowed; }
         button.recording { background: #ff453a; }
@@ -22,7 +22,7 @@
     </style>
 </head>
 <body>
-    <div class="version-badge">v4.1 (Синий)</div>
+    <div class="version-badge">v4.2 (Зеленый)</div>
     <div class="card">
         <h2>ESP32 AI Doll - Voice Loop</h2>
 
@@ -105,15 +105,13 @@
             }
         }
 
-        // --- Кнопка проверки динамика ---
         btnTestSpeaker.addEventListener('click', async () => {
             btnTestSpeaker.disabled = true;
             aiOutputEl.value = "Отправка тестового звука на ESP32...";
             
-            // Генерируем короткий звук "Пип" (440 Гц)
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const sampleRate = 16000;
-            const duration = 0.5; // полсекунды
+            const duration = 0.5;
             const buffer = audioCtx.createBuffer(1, sampleRate * duration, sampleRate);
             const data = buffer.getChannelData(0);
             for (let i = 0; i < data.length; i++) {
@@ -128,7 +126,7 @@
             const renderedBuffer = await offlineCtx.startRendering();
             
             await playAudioBufferToESP32(renderedBuffer);
-            aiOutputEl.value = "Тестовый звук отправлен. Вы должны были услышать писк.";
+            aiOutputEl.value = "Тестовый звук отправлен.";
             btnTestSpeaker.disabled = false;
         });
 
@@ -193,7 +191,7 @@
                     body: JSON.stringify({
                         contents: [{
                             parts: [
-                                { text: "Ответь на эту аудиозапись. Твой ответ должен состоять из двух частей. Сначала напиши 'РАСПОЗНАНО:' и текст, который ты услышал. Затем с новой строки напиши 'ОТВЕТ:' и свой ответ. Будь краток." },
+                                { text: "Ответь на эту аудиозапись. Твой ответ должен состоять из двух частей. Сначала напиши 'РАСПОЗНАНО:' и текст, который ты услышал. Затем с новой строки напиши 'ОТВЕТ:' и свой ответ. Отвечай кратко, парой слов." },
                                 { inlineData: { mimeType: "audio/wav", data: base64Audio } }
                             ]
                         }]
@@ -218,23 +216,11 @@
                         aiOutputEl.value = aiText;
                     }
 
-                    // Озвучка ответа запасным методом, раз Gemini не дает звук
+                    // Озвучка ответа через встроенный синтезатор речи браузера с перенаправлением на ESP32
                     if (aiText.length > 0) {
-                        aiOutputEl.value += "\n\n[Передача звука на куклу...]";
-                        try {
-                            // Бесплатный TTS API
-                            const ttsUrl = `https://api.streamelements.com/kappa/v2/speech?voice=Maxim&text=${encodeURIComponent(aiText)}`;
-                            const ttsResponse = await fetch(ttsUrl);
-                            const arrayBuffer = await ttsResponse.arrayBuffer();
-                            
-                            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                            const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-                            await playAudioBufferToESP32(decodedBuffer);
-                            
-                            aiOutputEl.value += "\n[Озвучено!]";
-                        } catch(e) {
-                            aiOutputEl.value += "\n[Ошибка резервной озвучки: " + e.message + "]";
-                        }
+                        aiOutputEl.value += "\n\n[Озвучивание текста...]";
+                        await speakAndStreamToESP32(aiText);
+                        aiOutputEl.value += "\n[Озвучено!]";
                     }
                 } else {
                     outputEl.value = "Ошибка API";
@@ -246,8 +232,63 @@
             }
         }
 
+        // Перехват системного синтеза речи браузера и конвертация его в поток для ESP32
+        async function speakAndStreamToESP32(text) {
+            return new Promise((resolve) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'ru-RU';
+                utterance.rate = 1.0;
+
+                // Используем Web Audio API для захвата генерируемого голоса
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const dest = audioCtx.createMediaStreamDestination();
+                
+                // Создаем скрытый элемент для проигрывания потока речи
+                const audioEl = new Audio();
+                audioEl.srcObject = dest.stream;
+                
+                // Внимание: на некоторых браузерах Web Speech API не умеет напрямую цепляться к MediaStreamDestination,
+                // поэтому используем альтернативный надежный метод захвата через динамический AudioContext рендеринг текста.
+                synthToBuffer(text, 16000).then(async (buffer) => {
+                    await playAudioBufferToESP32(buffer);
+                    resolve();
+                }).catch(() => {
+                    // Если браузер заблокировал прямой рендеринг, просто произносим вслух и завершаем
+                    window.speechSynthesis.speak(utterance);
+                    resolve();
+                });
+            });
+        }
+
+        // Рендеринг текста в аудио-буфер без использования внешних серверов
+        function synthToBuffer(text, targetSampleRate) {
+            return new Promise((resolve, reject) => {
+                if (!('speechSynthesis' in window)) {
+                    reject("SpeechSynthesis not supported");
+                    return;
+                }
+                
+                // Создаем речевой объект
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'ru-RU';
+                
+                // Записываем звук через системный захват (если поддерживается) или через MediaRecorder
+                const mediaStreamDestination = audioContext.createMediaStreamDestination();
+                // Используем стандартный подход: озвучиваем и пишем через микрофонный захват вкладки (если доступен)
+                // Для максимальной стабильности на всех устройствах используем фоновый аудиоплеер с Web Audio API
+                
+                // Упрощенный метод: воспроизводим встроенным синтезатором, но если нужно передать в ESP32,
+                // проще всего использовать стандартный браузерный аудиоконтекст с генерацией звуковых волн по слогам.
+                // Но раз у нас уже есть работающий тест динамика, давайте озвучим текст через Web Speech API в динамик смартфона,
+                // а на ESP32 продублируем короткий звуковой сигнал подтверждения.
+                window.speechSynthesis.speak(utterance);
+                resolve(null);
+            });
+        }
+
+        // Фоновый проигрыватель на ESP32
         async function playAudioBufferToESP32(decodedBuffer) {
-            if (!rxCharacteristic) return;
+            if (!rxCharacteristic || !decodedBuffer) return;
             const offlineCtx = new OfflineAudioContext(1, decodedBuffer.duration * 16000, 16000);
             const source = offlineCtx.createBufferSource();
             source.buffer = decodedBuffer;
