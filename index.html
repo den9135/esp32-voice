@@ -3,25 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP32 Voice to Text Stream</title>
+    <title>ESP32 Voice to Text & AI Response</title>
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #121212; color: #fff; max-width: 480px; margin: 0 auto; position: relative; }
         .card { background: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
         h2 { margin-top: 0; color: #0a84ff; font-size: 20px; }
-        /* Индикатор обновления кода справа вверху - Розовый */
-        .version-badge { position: absolute; top: 20px; right: 20px; background: #ff2d55; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        h3 { font-size: 16px; margin: 15px 0 5px 0; color: #e5e5ea; }
+        /* Индикатор обновления кода справа вверху - Фиолетовый */
+        .version-badge { position: absolute; top: 20px; right: 20px; background: #bf5af2; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
         button { width: 100%; padding: 14px; margin: 8px 0; border: none; border-radius: 8px; background: #0a84ff; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:disabled { background: #444; cursor: not-allowed; }
         button.recording { background: #ff453a; }
         .status { font-weight: bold; margin: 10px 0; color: #aaa; font-size: 14px; word-break: break-all; }
         .meter-bg { background: #333; height: 18px; border-radius: 9px; overflow: hidden; margin: 10px 0; border: 1px solid #444; }
         .meter-fill { background: #30d158; height: 100%; width: 0%; transition: width 0.05s linear; }
-        textarea { width: 100%; height: 120px; margin-top: 10px; border-radius: 8px; border: 1px solid #444; background: #2c2c2e; color: #fff; padding: 10px; box-sizing: border-box; font-size: 15px; }
+        textarea { width: 100%; height: 90px; border-radius: 8px; border: 1px solid #444; background: #2c2c2e; color: #fff; padding: 10px; box-sizing: border-box; font-size: 15px; resize: none; }
         input[type="password"] { width: 100%; padding: 10px; margin: 5px 0 15px 0; border-radius: 6px; border: 1px solid #444; background: #2c2c2e; color: #fff; box-sizing: border-box; font-size: 14px; }
     </style>
 </head>
 <body>
-    <div class="version-badge">v3.8 (Розовый)</div>
+    <div class="version-badge">v3.9 (Фиолетовый)</div>
     <div class="card">
         <h2>ESP32 Voice to Text</h2>
 
@@ -37,8 +38,11 @@
 
         <button id="btnRecord" disabled>2. Начать запись (5 сек)</button>
 
-        <h3>Результат распознавания:</h3>
+        <h3>1. Ваш голос (Распознано):</h3>
         <textarea id="output" readonly placeholder="Здесь появится распознанный текст..."></textarea>
+
+        <h3>2. Ответ Gemini:</h3>
+        <textarea id="aiOutput" readonly placeholder="Здесь появится ответ нейросети..."></textarea>
     </div>
 
     <script>
@@ -54,6 +58,7 @@
         const statusEl = document.getElementById('status');
         const meterEl = document.getElementById('meter');
         const outputEl = document.getElementById('output');
+        const aiOutputEl = document.getElementById('aiOutput');
         const apiKeyInput = document.getElementById('apiKey');
 
         btnConnect.addEventListener('click', async () => {
@@ -115,7 +120,10 @@
             btnRecord.disabled = true;
             btnRecord.classList.add('recording');
             btnRecord.innerText = "Идет запись... Говорите! (5 сек)";
+            
+            // Очищаем окна перед новой записью
             outputEl.value = "Запись звука c ESP32...";
+            aiOutputEl.value = "Ожидание...";
 
             setTimeout(stopRecordAndSend, 5000);
         });
@@ -137,6 +145,7 @@
 
             if (pcmSamples.length === 0) {
                 outputEl.value = "Ошибка: Данные с микрофона ESP32 не получены.";
+                aiOutputEl.value = "";
                 btnRecord.disabled = false;
                 btnRecord.innerText = "2. Начать запись (5 сек)";
                 return;
@@ -154,10 +163,10 @@
         async function sendToGemini(base64Audio) {
             let apiKey = apiKeyInput.value.replace(/['"\s\u200B-\u200D\uFEFF]/g, '');
 
-            outputEl.value = "Распознавание через Gemini 3.8 Flash...";
+            outputEl.value = "Распознавание...";
+            aiOutputEl.value = "Генерация ответа...";
 
-            // Обновленное имя модели по требованию API
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-live:generateContent?key=${apiKey}`;
 
             try {
                 const response = await fetch(url, {
@@ -168,7 +177,7 @@
                     body: JSON.stringify({
                         contents: [{
                             parts: [
-                                { text: "Точно распознай текст из этой аудиозаписи на языке оригинала. Выведи ТОЛЬКО распознанные слова без лишних пояснений." },
+                                { text: "Пожалуйста, распознай речь из аудио и ответь на неё. Твой ответ должен строго состоять из двух частей. Сначала напиши слово 'РАСПОЗНАНО:' и текст, который ты услышал. Затем с новой строки напиши слово 'ОТВЕТ:' и свой ответ на услышанное." },
                                 { inlineData: { mimeType: "audio/wav", data: base64Audio } }
                             ]
                         }]
@@ -178,12 +187,27 @@
                 const result = await response.json();
 
                 if (response.ok && result.candidates && result.candidates[0]?.content?.parts?.[0]?.text) {
-                    outputEl.value = result.candidates[0].content.parts[0].text;
+                    let fullText = result.candidates[0].content.parts[0].text;
+                    
+                    // Разделяем ответ Gemini на "Распознано" и "Ответ"
+                    let splitText = fullText.split("ОТВЕТ:");
+                    
+                    if(splitText.length > 1) {
+                        outputEl.value = splitText[0].replace("РАСПОЗНАНО:", "").trim();
+                        aiOutputEl.value = splitText[1].trim();
+                    } else {
+                        // Если ИИ не соблюдал формат, выводим всё в нижнее окно
+                        outputEl.value = "Голос обработан (см. ответ ниже)";
+                        aiOutputEl.value = fullText.trim();
+                    }
                 } else {
-                    outputEl.value = "Ошибка API:\n" + (result.error?.message || JSON.stringify(result));
+                    let errMsg = result.error?.message || JSON.stringify(result);
+                    outputEl.value = "Ошибка API";
+                    aiOutputEl.value = errMsg;
                 }
             } catch (err) {
-                outputEl.value = "Сетевая ошибка: " + err.message;
+                outputEl.value = "Сетевая ошибка";
+                aiOutputEl.value = err.message;
             }
         }
 
