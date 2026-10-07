@@ -216,17 +216,19 @@
                         aiOutputEl.value = aiText;
                     }
 
-                    // Синтезируем голос и отправляем на ESP32
+                   // Синтезируем голос и отправляем на ESP32
                     if (aiText.length > 0) {
                         aiOutputEl.value += "\n\n[Озвучивание и передача на куклу...]";
                         try {
-                            // Запрашиваем озвучку текста через надежный публичный TTS
-                            const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(aiText)}&tl=ru&client=tw-ob`;
+                            const ttsUrl = `https://api.streamelements.com/kappa/v2/speech?voice=Maxim&text=${encodeURIComponent(aiText)}`;
                             
                             const ttsResponse = await fetch(ttsUrl);
-                            const arrayBuffer = await ttsResponse.arrayBuffer();
+                            if (!ttsResponse.ok) throw new Error("HTTP error " + ttsResponse.status);
                             
+                            const arrayBuffer = await ttsResponse.arrayBuffer();
                             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                            
+                            // Браузер сам распознает MP3, WAV или OGG благодаря arrayBuffer
                             const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
                             
                             await playAudioBufferToESP32(decodedBuffer);
