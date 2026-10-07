@@ -7,9 +7,9 @@
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #121212; color: #fff; max-width: 480px; margin: 0 auto; position: relative; }
         .card { background: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
-        h2 { margin-top: 0; color: #32d74b; font-size: 20px; }
+        h2 { margin-top: 0; color: #ffd60a; font-size: 20px; }
         h3 { font-size: 16px; margin: 15px 0 5px 0; color: #e5e5ea; }
-        .version-badge { position: absolute; top: 20px; right: 20px; background: #32d74b; color: #000; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        .version-badge { position: absolute; top: 20px; right: 20px; background: #ffd60a; color: #000; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
         button { width: 100%; padding: 14px; margin: 8px 0; border: none; border-radius: 8px; background: #0a84ff; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:disabled { background: #444; cursor: not-allowed; }
         button.recording { background: #ff453a; }
@@ -22,7 +22,7 @@
     </style>
 </head>
 <body>
-    <div class="version-badge">v4.4 (Бирюзовый)</div>
+    <div class="version-badge">v4.4 (Желтый)</div>
     <div class="card">
         <h2>ESP32 AI Doll - Voice Loop</h2>
 
@@ -47,227 +47,230 @@
     </div>
 
     <script>
-        const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-        const CHARACTERISTIC_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; 
-        const CHARACTERISTIC_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; 
+        const BLE_SVC = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+        const BLE_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; 
+        const BLE_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; 
 
-        let bluetoothDevice, txCharacteristic, rxCharacteristic;
-        let isRecording = false;
-        let recordedChunks = [];
+        let devBLE, charTX, charRX;
+        let isRec = false;
+        let audioChunks = [];
 
-        const btnConnect = document.getElementById('btnConnect');
-        const btnTestSpeaker = document.getElementById('btnTestSpeaker');
-        const btnRecord = document.getElementById('btnRecord');
-        const statusEl = document.getElementById('status');
-        const meterEl = document.getElementById('meter');
-        const outputEl = document.getElementById('output');
-        const aiOutputEl = document.getElementById('aiOutput');
-        const apiKeyInput = document.getElementById('apiKey');
+        const elConnect = document.getElementById('btnConnect');
+        const elTest = document.getElementById('btnTestSpeaker');
+        const elRecord = document.getElementById('btnRecord');
+        const elStatus = document.getElementById('status');
+        const elMeter = document.getElementById('meter');
+        const elOut = document.getElementById('output');
+        const elAiOut = document.getElementById('aiOutput');
+        const elKey = document.getElementById('apiKey');
 
-        btnConnect.addEventListener('click', async () => {
+        elConnect.addEventListener('click', async () => {
             try {
-                statusEl.innerText = "Поиск ESP32...";
-                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                elStatus.innerText = "Поиск ESP32...";
+                devBLE = await navigator.bluetooth.requestDevice({
                     filters: [{ name: 'ESP32_Voice_Test' }],
-                    optionalServices: [SERVICE_UUID]
+                    optionalServices: [BLE_SVC]
                 });
 
-                const server = await bluetoothDevice.gatt.connect();
-                const service = await server.getPrimaryService(SERVICE_UUID);
+                const gattServer = await devBLE.gatt.connect();
+                const srv = await gattServer.getPrimaryService(BLE_SVC);
                 
-                txCharacteristic = await service.getCharacteristic(CHARACTERISTIC_TX);
-                rxCharacteristic = await service.getCharacteristic(CHARACTERISTIC_RX);
+                charTX = await srv.getCharacteristic(BLE_TX);
+                charRX = await srv.getCharacteristic(BLE_RX);
 
-                await txCharacteristic.startNotifications();
-                txCharacteristic.addEventListener('characteristicvaluechanged', handleIncomingAudio);
+                await charTX.startNotifications();
+                charTX.addEventListener('characteristicvaluechanged', onMicData);
 
-                statusEl.innerText = "Статус: Подключено (TX и RX)!";
-                statusEl.style.color = "#30d158";
-                btnRecord.disabled = false;
-                btnTestSpeaker.disabled = false;
-                btnConnect.disabled = true;
-            } catch (error) {
-                statusEl.innerText = "Ошибка: " + error.message;
-                statusEl.style.color = "#ff453a";
+                elStatus.innerText = "Статус: Подключено (TX и RX)!";
+                elStatus.style.color = "#30d158";
+                elRecord.disabled = false;
+                elTest.disabled = false;
+                elConnect.disabled = true;
+            } catch (err) {
+                elStatus.innerText = "Ошибка: " + err.message;
+                elStatus.style.color = "#ff453a";
             }
         });
 
-        function handleIncomingAudio(event) {
-            const dataView = event.target.value;
-            const samples = new Int16Array(dataView.buffer, dataView.byteOffset, dataView.byteLength / 2);
-            if (samples.length > 0) {
-                let sum = 0;
-                for (let i = 0; i < samples.length; i++) sum += Math.abs(samples[i]);
-                meterEl.style.width = Math.min(100, ((sum / samples.length) / 800) * 100).toFixed(1) + '%';
+        function onMicData(evt) {
+            const bufferView = evt.target.value;
+            const pcmData = new Int16Array(bufferView.buffer, bufferView.byteOffset, bufferView.byteLength / 2);
+            if (pcmData.length > 0) {
+                let ampSum = 0;
+                for (let i = 0; i < pcmData.length; i++) ampSum += Math.abs(pcmData[i]);
+                elMeter.style.width = Math.min(100, ((ampSum / pcmData.length) / 800) * 100).toFixed(1) + '%';
             }
-            if (isRecording) {
-                recordedChunks.push(new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength));
+            if (isRec) {
+                audioChunks.push(new Uint8Array(bufferView.buffer, bufferView.byteOffset, bufferView.byteLength));
             }
         }
 
-        btnTestSpeaker.addEventListener('click', async () => {
-            btnTestSpeaker.disabled = true;
-            aiOutputEl.value = "Отправка тестового звука на ESP32...";
+        elTest.addEventListener('click', async () => {
+            elTest.disabled = true;
+            elAiOut.value = "Отправка тестового звука на ESP32...";
             
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const sampleRate = 16000;
-            const duration = 0.5;
-            const buffer = audioCtx.createBuffer(1, sampleRate * duration, sampleRate);
-            const data = buffer.getChannelData(0);
-            for (let i = 0; i < data.length; i++) {
-                data[i] = Math.sin(2 * Math.PI * 440 * (i / sampleRate)); 
+            const aCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const rate = 16000;
+            const dur = 0.5;
+            const buf = aCtx.createBuffer(1, rate * dur, rate);
+            const channel = buf.getChannelData(0);
+            for (let i = 0; i < channel.length; i++) {
+                channel[i] = Math.sin(2 * Math.PI * 440 * (i / rate)); 
             }
             
-            const offlineCtx = new OfflineAudioContext(1, sampleRate * duration, sampleRate);
-            const source = offlineCtx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(offlineCtx.destination);
-            source.start();
-            const renderedBuffer = await offlineCtx.startRendering();
+            const offCtx = new OfflineAudioContext(1, rate * dur, rate);
+            const src = offCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect(offCtx.destination);
+            src.start();
+            const rendered = await offCtx.startRendering();
             
-            await playAudioBufferToESP32(renderedBuffer);
-            aiOutputEl.value = "Тестовый звук отправлен.";
-            btnTestSpeaker.disabled = false;
+            await sendAudioToBoard(rendered);
+            elAiOut.value = "Тестовый звук отправлен.";
+            elTest.disabled = false;
         });
 
-        btnRecord.addEventListener('click', () => {
-            const apiKey = apiKeyInput.value.trim();
-            if (!apiKey) {
+        elRecord.addEventListener('click', () => {
+            const key = elKey.value.trim();
+            if (!key) {
                 alert("Введите API ключ!");
                 return;
             }
-            if (isRecording) return;
+            if (isRec) return;
 
-            isRecording = true;
-            recordedChunks = [];
-            btnRecord.disabled = true;
-            btnRecord.classList.add('recording');
-            btnRecord.innerText = "Идет запись... Говорите! (5 сек)";
-            outputEl.value = "Запись звука...";
-            aiOutputEl.value = "Ожидание...";
+            isRec = true;
+            audioChunks = [];
+            elRecord.disabled = true;
+            elRecord.classList.add('recording');
+            elRecord.innerText = "Идет запись... Говорите! (5 сек)";
+            elOut.value = "Запись звука...";
+            elAiOut.value = "Ожидание...";
 
-            setTimeout(stopRecordAndSend, 5000);
+            setTimeout(processRecording, 5000);
         });
 
-        async function stopRecordAndSend() {
-            isRecording = false;
-            btnRecord.innerText = "Обработка и отправка...";
-            btnRecord.classList.remove('recording');
+        async function processRecording() {
+            isRec = false;
+            elRecord.innerText = "Обработка и отправка...";
+            elRecord.classList.remove('recording');
 
-            let totalLength = recordedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
-            let mergedArray = new Uint8Array(totalLength);
-            let offset = 0;
-            for (let chunk of recordedChunks) {
-                mergedArray.set(chunk, offset);
-                offset += chunk.length;
+            let totalSize = audioChunks.reduce((sum, ch) => sum + ch.length, 0);
+            let combined = new Uint8Array(totalSize);
+            let currOffset = 0;
+            for (let ch of audioChunks) {
+                combined.set(ch, currOffset);
+                currOffset += ch.length;
             }
 
-            let pcmSamples = new Int16Array(mergedArray.buffer);
-            if (pcmSamples.length === 0) {
-                outputEl.value = "Ошибка: Нет звука с микрофона.";
-                btnRecord.disabled = false;
-                btnRecord.innerText = "2. Начать запись (5 сек)";
+            let samples16 = new Int16Array(combined.buffer);
+            if (samples16.length === 0) {
+                elOut.value = "Ошибка: Нет звука с микрофона.";
+                elRecord.disabled = false;
+                elRecord.innerText = "2. Начать запись (5 сек)";
                 return;
             }
 
-            const wavBlob = createWavBlob(pcmSamples, 16000);
-            const base64Audio = await blobToBase64(wavBlob);
-            await sendToGemini(base64Audio);
+            const wavData = generateWav(samples16, 16000);
+            const b64 = await convertToBase64(wavData);
+            await queryGeminiAPI(b64);
 
-            btnRecord.disabled = false;
-            btnRecord.innerText = "2. Начать запись (5 сек)";
+            elRecord.disabled = false;
+            elRecord.innerText = "2. Начать запись (5 сек)";
         }
 
-        async function sendToGemini(base64Audio) {
-            let apiKey = apiKeyInput.value.replace(/['"\s\u200B-\u200D\uFEFF]/g, '');
-            outputEl.value = "Распознавание...";
-            aiOutputEl.value = "Генерация ответа...";
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`;
+        async function queryGeminiAPI(b64Audio) {
+            let key = elKey.value.replace(/['"\s\u200B-\u200D\uFEFF]/g, '');
+            elOut.value = "Распознавание...";
+            elAiOut.value = "Генерация ответа...";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${key}`;
 
             try {
-                const response = await fetch(url, {
+                const req = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         contents: [{
                             parts: [
                                 { text: "Ответь на эту аудиозапись. Твой ответ должен состоять из двух частей. Сначала напиши 'РАСПОЗНАНО:' и текст, который ты услышал. Затем с новой строки напиши 'ОТВЕТ:' и свой ответ. Отвечай кратко, парой слов." },
-                                { inlineData: { mimeType: "audio/wav", data: base64Audio } }
+                                { inlineData: { mimeType: "audio/wav", data: b64Audio } }
                             ]
                         }]
                     })
                 });
 
-                const result = await response.json();
+                const apiRes = await req.json();
 
-                if (response.ok && result.candidates && result.candidates[0]?.content?.parts) {
-                    const textPart = result.candidates[0].content.parts.find(p => p.text);
-                    let aiText = "";
+                if (req.ok && apiRes.candidates && apiRes.candidates[0]?.content?.parts) {
+                    const textItem = apiRes.candidates[0].content.parts.find(x => x.text);
+                    let finalAnswer = "";
                     
-                    if (textPart) {
-                        let splitText = textPart.text.split("ОТВЕТ:");
-                        if(splitText.length > 1) {
-                            outputEl.value = splitText[0].replace("РАСПОЗНАНО:", "").trim();
-                            aiText = splitText[1].trim();
+                    if (textItem) {
+                        let textParts = textItem.text.split("ОТВЕТ:");
+                        if(textParts.length > 1) {
+                            elOut.value = textParts[0].replace("РАСПОЗНАНО:", "").trim();
+                            finalAnswer = textParts[1].trim();
                         } else {
-                            outputEl.value = "Голос обработан";
-                            aiText = textPart.text.trim();
+                            elOut.value = "Голос обработан";
+                            finalAnswer = textItem.text.trim();
                         }
-                        aiOutputEl.value = aiText;
+                        elAiOut.value = finalAnswer;
                     }
 
-                   // Синтезируем голос и отправляем на ESP32
-                    if (aiText.length > 0) {
-                        aiOutputEl.value += "\n\n[Озвучивание и передача на куклу...]";
+                    if (finalAnswer.length > 0) {
+                        elAiOut.value += "\n\n[Озвучивание текста...]";
                         try {
-                            const ttsUrl = `https://api.streamelements.com/kappa/v2/speech?voice=Maxim&text=${encodeURIComponent(aiText)}`;
+                            // Формируем URL к оригинальному Google TTS
+                            const googleTTS = `https://translate.googleapis.com/translate_tts?client=gtx&ie=UTF-8&tl=ru&q=${encodeURIComponent(finalAnswer)}`;
                             
-                            const ttsResponse = await fetch(ttsUrl);
-                            if (!ttsResponse.ok) throw new Error("HTTP error " + ttsResponse.status);
+                            // Заворачиваем запрос в AllOrigins для обхода CORS
+                            const proxyWrap = `https://api.allorigins.win/raw?url=${encodeURIComponent(googleTTS)}`;
                             
-                            const arrayBuffer = await ttsResponse.arrayBuffer();
-                            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                            const ttsReq = await fetch(proxyWrap);
+                            if (!ttsReq.ok) throw new Error("TTS proxy error " + ttsReq.status);
                             
-                            // Браузер сам распознает MP3, WAV или OGG благодаря arrayBuffer
-                            const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                            const audioBytes = await ttsReq.arrayBuffer();
                             
-                            await playAudioBufferToESP32(decodedBuffer);
-                            aiOutputEl.value += "\n[Озвучено и передано!]";
-                        } catch(e) {
-                            aiOutputEl.value += "\n[Ошибка озвучки: " + e.message + "]";
+                            const sysAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                            const decodedSnd = await sysAudioCtx.decodeAudioData(audioBytes);
+                            
+                            await sendAudioToBoard(decodedSnd);
+                            elAiOut.value += "\n[Успешно озвучено и передано!]";
+                        } catch(err) {
+                            elAiOut.value += "\n[Ошибка озвучки: " + err.message + "]";
                         }
                     }
                 } else {
-                    outputEl.value = "Ошибка API";
-                    aiOutputEl.value = result.error?.message || JSON.stringify(result);
+                    elOut.value = "Ошибка API";
+                    elAiOut.value = apiRes.error?.message || JSON.stringify(apiRes);
                 }
-            } catch (err) {
-                outputEl.value = "Сетевая ошибка";
-                aiOutputEl.value = err.message;
+            } catch (networkErr) {
+                elOut.value = "Сетевая ошибка";
+                elAiOut.value = networkErr.message;
             }
         }
 
-        async function playAudioBufferToESP32(decodedBuffer) {
-            if (!rxCharacteristic || !decodedBuffer) return;
-            const offlineCtx = new OfflineAudioContext(1, decodedBuffer.duration * 16000, 16000);
-            const source = offlineCtx.createBufferSource();
-            source.buffer = decodedBuffer;
-            source.connect(offlineCtx.destination);
-            source.start();
-            const resampledBuffer = await offlineCtx.startRendering();
+        async function sendAudioToBoard(audioBuffer) {
+            if (!charRX || !audioBuffer) return;
+            const targetRate = 16000;
+            const oCtx = new OfflineAudioContext(1, audioBuffer.duration * targetRate, targetRate);
+            const bufferSource = oCtx.createBufferSource();
+            bufferSource.buffer = audioBuffer;
+            bufferSource.connect(oCtx.destination);
+            bufferSource.start();
+            const resampled = await oCtx.startRendering();
 
-            const floatData = resampledBuffer.getChannelData(0);
-            const int16Data = new Int16Array(floatData.length);
-            for (let i = 0; i < floatData.length; i++) {
-                let s = Math.max(-1, Math.min(1, floatData[i]));
-                int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            const floats = resampled.getChannelData(0);
+            const ints = new Int16Array(floats.length);
+            for (let i = 0; i < floats.length; i++) {
+                let v = Math.max(-1, Math.min(1, floats[i]));
+                ints[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
             }
 
-            const CHUNK_SIZE = 120; 
-            for (let i = 0; i < int16Data.length; i += CHUNK_SIZE) {
-                const chunk = int16Data.slice(i, i + CHUNK_SIZE);
+            const packSize = 120; 
+            for (let idx = 0; idx < ints.length; idx += packSize) {
+                const packet = ints.slice(idx, idx + packSize);
                 try {
-                    await rxCharacteristic.writeValueWithoutResponse(chunk.buffer);
+                    await charRX.writeValueWithoutResponse(packet.buffer);
                     await new Promise(r => setTimeout(r, 7)); 
                 } catch(e) {
                     break;
@@ -275,37 +278,35 @@
             }
         }
 
-        function createWavBlob(samples, sampleRate) {
-            const buffer = new ArrayBuffer(44 + samples.length * 2);
-            const view = new DataView(buffer);
-            writeString(view, 0, 'RIFF');
-            view.setUint32(4, 36 + samples.length * 2, true);
-            writeString(view, 8, 'WAVE');
-            writeString(view, 12, 'fmt ');
+        function generateWav(audioArr, hz) {
+            const arrBuf = new ArrayBuffer(44 + audioArr.length * 2);
+            const view = new DataView(arrBuf);
+            const writeTXT = (offset, txt) => { for (let n = 0; n < txt.length; n++) view.setUint8(offset + n, txt.charCodeAt(n)); };
+            
+            writeTXT(0, 'RIFF');
+            view.setUint32(4, 36 + audioArr.length * 2, true);
+            writeTXT(8, 'WAVE');
+            writeTXT(12, 'fmt ');
             view.setUint32(16, 16, true);
             view.setUint16(20, 1, true);
             view.setUint16(22, 1, true);
-            view.setUint32(24, sampleRate, true);
-            view.setUint32(28, sampleRate * 2, true);
+            view.setUint32(24, hz, true);
+            view.setUint32(28, hz * 2, true);
             view.setUint16(32, 2, true);
             view.setUint16(34, 16, true);
-            writeString(view, 36, 'data');
-            view.setUint32(40, samples.length * 2, true);
-            for (let i = 0; i < samples.length; i++) {
-                view.setInt16(44 + i * 2, samples[i], true);
+            writeTXT(36, 'data');
+            view.setUint32(40, audioArr.length * 2, true);
+            for (let p = 0; p < audioArr.length; p++) {
+                view.setInt16(44 + p * 2, audioArr[p], true);
             }
             return new Blob([view], { type: 'audio/wav' });
         }
 
-        function writeString(view, offset, string) {
-            for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
-        }
-
-        function blobToBase64(blob) {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result.split(',')[1]);
-                reader.readAsDataURL(blob);
+        function convertToBase64(blobObj) {
+            return new Promise((res) => {
+                const fr = new FileReader();
+                fr.onloadend = () => res(fr.result.split(',')[1]);
+                fr.readAsDataURL(blobObj);
             });
         }
     </script>
