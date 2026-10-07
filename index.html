@@ -7,9 +7,9 @@
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #121212; color: #fff; max-width: 480px; margin: 0 auto; position: relative; }
         .card { background: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
-        h2 { margin-top: 0; color: #af52de; font-size: 20px; }
+        h2 { margin-top: 0; color: #ff453a; font-size: 20px; }
         h3 { font-size: 16px; margin: 15px 0 5px 0; color: #e5e5ea; }
-        .version-badge { position: absolute; top: 20px; right: 20px; background: #af52de; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        .version-badge { position: absolute; top: 20px; right: 20px; background: #ff453a; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
         button { width: 100%; padding: 14px; margin: 8px 0; border: none; border-radius: 8px; background: #0a84ff; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:disabled { background: #444; cursor: not-allowed; }
         button.recording { background: #ff453a; }
@@ -22,7 +22,7 @@
     </style>
 </head>
 <body>
-    <div class="version-badge">v4.5 (Фиолетовый)</div>
+    <div class="version-badge">v4.6 (Красный)</div>
     <div class="card">
         <h2>ESP32 AI Doll - Voice Loop</h2>
 
@@ -217,18 +217,37 @@
                     }
 
                     if (finalAnswer.length > 0) {
-                        elAiOut.value += "\n\n[Озвучивание текста...]";
+                        elAiOut.value += "\n\n[Поиск сервера озвучки...]";
                         try {
-                            // Формируем URL к оригинальному Google TTS с защитой от кэширования
-                            const googleTTS = `https://translate.googleapis.com/translate_tts?client=gtx&ie=UTF-8&tl=ru&q=${encodeURIComponent(finalAnswer)}&_t=${Date.now()}`;
+                            const googleTTS = `https://translate.googleapis.com/translate_tts?client=gtx&ie=UTF-8&tl=ru&q=${encodeURIComponent(finalAnswer)}`;
                             
-                            // Надежный прокси-сервер CodeTabs для обхода CORS
-                            const proxyWrap = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(googleTTS)}`;
-                            
-                            const ttsReq = await fetch(proxyWrap);
-                            if (!ttsReq.ok) throw new Error("TTS proxy error " + ttsReq.status);
-                            
-                            const audioBytes = await ttsReq.arrayBuffer();
+                            // Каскадный массив серверов - если один заблокирован, пробуем следующий
+                            const proxyServers = [
+                                `https://corsproxy.io/?${encodeURIComponent(googleTTS)}`,
+                                `https://thingproxy.freeboard.io/fetch/${googleTTS}`,
+                                `https://api.allorigins.win/raw?url=${encodeURIComponent(googleTTS)}`
+                            ];
+
+                            let audioBytes = null;
+                            let lastError = "";
+
+                            for (let proxyUrl of proxyServers) {
+                                try {
+                                    const ttsReq = await fetch(proxyUrl);
+                                    if (ttsReq.ok) {
+                                        audioBytes = await ttsReq.arrayBuffer();
+                                        elAiOut.value += "\n[Сервер найден. Передача...]";
+                                        break; 
+                                    }
+                                } catch(err) {
+                                    lastError = err.message;
+                                    // Тихо переходим к следующему прокси
+                                }
+                            }
+
+                            if (!audioBytes) {
+                                throw new Error("Все сервера заблокированы: " + lastError);
+                            }
                             
                             const sysAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
                             const decodedSnd = await sysAudioCtx.decodeAudioData(audioBytes);
@@ -262,7 +281,7 @@
             const floats = resampled.getChannelData(0);
             const ints = new Int16Array(floats.length);
             
-            // Фильтр от хрипов: приглушаем сигнал на 70%, оставляем 30% чистой громкости
+            // Фильтр громкости: 30% мощности для чистого звука без перегруза
             const volume = 0.3; 
             
             for (let i = 0; i < floats.length; i++) {
@@ -275,7 +294,7 @@
                 const packet = ints.slice(idx, idx + packSize);
                 try {
                     await charRX.writeValueWithoutResponse(packet.buffer);
-                    // Оптимизированный тайминг (6 миллисекунд), чтобы плата успевала проигрывать пакеты без заикания
+                    // Оптимизированный тайминг для устранения заиканий
                     await new Promise(r => setTimeout(r, 6)); 
                 } catch(e) {
                     console.error("Ошибка BLE:", e);
