@@ -7,23 +7,24 @@
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #121212; color: #fff; max-width: 480px; margin: 0 auto; position: relative; }
         .card { background: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
-        h2 { margin-top: 0; color: #ff9f0a; font-size: 20px; }
+        h2 { margin-top: 0; color: #0a84ff; font-size: 20px; }
         h3 { font-size: 16px; margin: 15px 0 5px 0; color: #e5e5ea; }
-        .version-badge { position: absolute; top: 20px; right: 20px; background: #ff9f0a; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        .version-badge { position: absolute; top: 20px; right: 20px; background: #0a84ff; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
         button { width: 100%; padding: 14px; margin: 8px 0; border: none; border-radius: 8px; background: #0a84ff; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:disabled { background: #444; cursor: not-allowed; }
         button.recording { background: #ff453a; }
+        .btn-test { background: #ff9f0a; }
         .status { font-weight: bold; margin: 10px 0; color: #aaa; font-size: 14px; word-break: break-all; }
         .meter-bg { background: #333; height: 18px; border-radius: 9px; overflow: hidden; margin: 10px 0; border: 1px solid #444; }
         .meter-fill { background: #30d158; height: 100%; width: 0%; transition: width 0.05s linear; }
-        textarea { width: 100%; height: 90px; border-radius: 8px; border: 1px solid #444; background: #2c2c2e; color: #fff; padding: 10px; box-sizing: border-box; font-size: 15px; resize: none; }
+        textarea { width: 100%; height: 100px; border-radius: 8px; border: 1px solid #444; background: #2c2c2e; color: #fff; padding: 10px; box-sizing: border-box; font-size: 15px; resize: none; }
         input[type="password"] { width: 100%; padding: 10px; margin: 5px 0 15px 0; border-radius: 6px; border: 1px solid #444; background: #2c2c2e; color: #fff; box-sizing: border-box; font-size: 14px; }
     </style>
 </head>
 <body>
-    <div class="version-badge">v4.1 (Оранжевый)</div>
+    <div class="version-badge">v4.1 (Синий)</div>
     <div class="card">
-        <h2>ESP32 AI Doll - Full Loop</h2>
+        <h2>ESP32 AI Doll - Voice Loop</h2>
 
         <label for="apiKey">API Ключ:</label>
         <input type="password" id="apiKey" placeholder="Вставьте ключ...">
@@ -31,13 +32,14 @@
         <div class="status" id="status">Статус: Отключено</div>
         
         <button id="btnConnect">1. Подключить ESP32 (BLE)</button>
+        <button id="btnTestSpeaker" class="btn-test" disabled>🎵 Тест динамика</button>
         
-        <label>Индикатор уровня микрофона ESP32:</label>
+        <label>Индикатор микрофона:</label>
         <div class="meter-bg"><div class="meter-fill" id="meter"></div></div>
 
         <button id="btnRecord" disabled>2. Начать запись (5 сек)</button>
 
-        <h3>1. Ваш голос (Распознано):</h3>
+        <h3>1. Ваш голос:</h3>
         <textarea id="output" readonly placeholder="Здесь появится распознанный текст..."></textarea>
 
         <h3>2. Ответ Gemini:</h3>
@@ -46,14 +48,15 @@
 
     <script>
         const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-        const CHARACTERISTIC_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // ESP32 -> Браузер (Микрофон)
-        const CHARACTERISTIC_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // Браузер -> ESP32 (Динамик)
+        const CHARACTERISTIC_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; 
+        const CHARACTERISTIC_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; 
 
         let bluetoothDevice, txCharacteristic, rxCharacteristic;
         let isRecording = false;
         let recordedChunks = [];
 
         const btnConnect = document.getElementById('btnConnect');
+        const btnTestSpeaker = document.getElementById('btnTestSpeaker');
         const btnRecord = document.getElementById('btnRecord');
         const statusEl = document.getElementById('status');
         const meterEl = document.getElementById('meter');
@@ -72,7 +75,6 @@
                 const server = await bluetoothDevice.gatt.connect();
                 const service = await server.getPrimaryService(SERVICE_UUID);
                 
-                // Подключаем обе характеристики
                 txCharacteristic = await service.getCharacteristic(CHARACTERISTIC_TX);
                 rxCharacteristic = await service.getCharacteristic(CHARACTERISTIC_RX);
 
@@ -82,6 +84,7 @@
                 statusEl.innerText = "Статус: Подключено (TX и RX)!";
                 statusEl.style.color = "#30d158";
                 btnRecord.disabled = false;
+                btnTestSpeaker.disabled = false;
                 btnConnect.disabled = true;
             } catch (error) {
                 statusEl.innerText = "Ошибка: " + error.message;
@@ -92,30 +95,49 @@
         function handleIncomingAudio(event) {
             const dataView = event.target.value;
             const samples = new Int16Array(dataView.buffer, dataView.byteOffset, dataView.byteLength / 2);
-
             if (samples.length > 0) {
                 let sum = 0;
-                for (let i = 0; i < samples.length; i++) {
-                    sum += Math.abs(samples[i]);
-                }
-                let avg = sum / samples.length;
-                let percent = Math.min(100, (avg / 800) * 100);
-                meterEl.style.width = percent.toFixed(1) + '%';
+                for (let i = 0; i < samples.length; i++) sum += Math.abs(samples[i]);
+                meterEl.style.width = Math.min(100, ((sum / samples.length) / 800) * 100).toFixed(1) + '%';
             }
-
             if (isRecording) {
-                const chunk = new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength);
-                recordedChunks.push(new Uint8Array(chunk));
+                recordedChunks.push(new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength));
             }
         }
+
+        // --- Кнопка проверки динамика ---
+        btnTestSpeaker.addEventListener('click', async () => {
+            btnTestSpeaker.disabled = true;
+            aiOutputEl.value = "Отправка тестового звука на ESP32...";
+            
+            // Генерируем короткий звук "Пип" (440 Гц)
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const sampleRate = 16000;
+            const duration = 0.5; // полсекунды
+            const buffer = audioCtx.createBuffer(1, sampleRate * duration, sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < data.length; i++) {
+                data[i] = Math.sin(2 * Math.PI * 440 * (i / sampleRate)); 
+            }
+            
+            const offlineCtx = new OfflineAudioContext(1, sampleRate * duration, sampleRate);
+            const source = offlineCtx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(offlineCtx.destination);
+            source.start();
+            const renderedBuffer = await offlineCtx.startRendering();
+            
+            await playAudioBufferToESP32(renderedBuffer);
+            aiOutputEl.value = "Тестовый звук отправлен. Вы должны были услышать писк.";
+            btnTestSpeaker.disabled = false;
+        });
 
         btnRecord.addEventListener('click', () => {
             const apiKey = apiKeyInput.value.trim();
             if (!apiKey) {
-                alert("Сначала вставьте ваш API ключ в верхнее поле!");
+                alert("Введите API ключ!");
                 return;
             }
-
             if (isRecording) return;
 
             isRecording = true;
@@ -123,8 +145,7 @@
             btnRecord.disabled = true;
             btnRecord.classList.add('recording');
             btnRecord.innerText = "Идет запись... Говорите! (5 сек)";
-            
-            outputEl.value = "Запись звука c ESP32...";
+            outputEl.value = "Запись звука...";
             aiOutputEl.value = "Ожидание...";
 
             setTimeout(stopRecordAndSend, 5000);
@@ -144,10 +165,8 @@
             }
 
             let pcmSamples = new Int16Array(mergedArray.buffer);
-
             if (pcmSamples.length === 0) {
-                outputEl.value = "Ошибка: Данные с микрофона ESP32 не получены.";
-                aiOutputEl.value = "";
+                outputEl.value = "Ошибка: Нет звука с микрофона.";
                 btnRecord.disabled = false;
                 btnRecord.innerText = "2. Начать запись (5 сек)";
                 return;
@@ -155,7 +174,6 @@
 
             const wavBlob = createWavBlob(pcmSamples, 16000);
             const base64Audio = await blobToBase64(wavBlob);
-
             await sendToGemini(base64Audio);
 
             btnRecord.disabled = false;
@@ -164,10 +182,8 @@
 
         async function sendToGemini(base64Audio) {
             let apiKey = apiKeyInput.value.replace(/['"\s\u200B-\u200D\uFEFF]/g, '');
-
             outputEl.value = "Распознавание...";
             aiOutputEl.value = "Генерация ответа...";
-
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`;
 
             try {
@@ -177,48 +193,48 @@
                     body: JSON.stringify({
                         contents: [{
                             parts: [
-                                { text: "Ответь на эту аудиозапись. Твой ответ должен строго состоять из двух частей. Сначала напиши 'РАСПОЗНАНО:' и текст, который ты услышал. Затем с новой строки напиши 'ОТВЕТ:' и свой ответ. Отвечай кратко, как игрушка-помощник." },
+                                { text: "Ответь на эту аудиозапись. Твой ответ должен состоять из двух частей. Сначала напиши 'РАСПОЗНАНО:' и текст, который ты услышал. Затем с новой строки напиши 'ОТВЕТ:' и свой ответ. Будь краток." },
                                 { inlineData: { mimeType: "audio/wav", data: base64Audio } }
                             ]
-                        }],
-                        // Запрашиваем генерацию аудио от Gemini (TTS)
-                        generationConfig: {
-                            responseModalities: ["TEXT", "AUDIO"],
-                            speechConfig: {
-                                voiceConfig: {
-                                    prebuiltVoiceConfig: { voiceName: "Puck" } // Доступные голоса: Puck, Aoede, Charon, Kore, Fenrir
-                                }
-                            }
-                        }
+                        }]
                     })
                 });
 
                 const result = await response.json();
 
                 if (response.ok && result.candidates && result.candidates[0]?.content?.parts) {
-                    const parts = result.candidates[0].content.parts;
+                    const textPart = result.candidates[0].content.parts.find(p => p.text);
+                    let aiText = "";
                     
-                    // 1. Извлекаем и выводим текст
-                    const textPart = parts.find(p => p.text);
                     if (textPart) {
                         let splitText = textPart.text.split("ОТВЕТ:");
                         if(splitText.length > 1) {
                             outputEl.value = splitText[0].replace("РАСПОЗНАНО:", "").trim();
-                            aiOutputEl.value = splitText[1].trim();
+                            aiText = splitText[1].trim();
                         } else {
                             outputEl.value = "Голос обработан";
-                            aiOutputEl.value = textPart.text.trim();
+                            aiText = textPart.text.trim();
                         }
+                        aiOutputEl.value = aiText;
                     }
 
-                    // 2. Извлекаем аудио и отправляем на ESP32
-                    const audioPart = parts.find(p => p.inlineData && p.inlineData.mimeType.startsWith("audio"));
-                    if (audioPart) {
+                    // Озвучка ответа запасным методом, раз Gemini не дает звук
+                    if (aiText.length > 0) {
                         aiOutputEl.value += "\n\n[Передача звука на куклу...]";
-                        await streamAudioToESP32(audioPart.inlineData.data);
-                        aiOutputEl.value += "\n[Озвучено!]";
-                    } else {
-                        aiOutputEl.value += "\n\n[Ошибка: Gemini не вернул аудио]";
+                        try {
+                            // Бесплатный TTS API
+                            const ttsUrl = `https://api.streamelements.com/kappa/v2/speech?voice=Maxim&text=${encodeURIComponent(aiText)}`;
+                            const ttsResponse = await fetch(ttsUrl);
+                            const arrayBuffer = await ttsResponse.arrayBuffer();
+                            
+                            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                            const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                            await playAudioBufferToESP32(decodedBuffer);
+                            
+                            aiOutputEl.value += "\n[Озвучено!]";
+                        } catch(e) {
+                            aiOutputEl.value += "\n[Ошибка резервной озвучки: " + e.message + "]";
+                        }
                     }
                 } else {
                     outputEl.value = "Ошибка API";
@@ -230,21 +246,8 @@
             }
         }
 
-        // Функция для отправки звука на ESP32 по Bluetooth
-        async function streamAudioToESP32(base64Audio) {
+        async function playAudioBufferToESP32(decodedBuffer) {
             if (!rxCharacteristic) return;
-
-            // 1. Декодируем Base64 в сырые байты
-            const binaryString = window.atob(base64Audio);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-
-            // 2. Переводим звук в формат 16kHz Mono с помощью Web Audio API
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const decodedBuffer = await audioCtx.decodeAudioData(bytes.buffer);
-            
             const offlineCtx = new OfflineAudioContext(1, decodedBuffer.duration * 16000, 16000);
             const source = offlineCtx.createBufferSource();
             source.buffer = decodedBuffer;
@@ -252,7 +255,6 @@
             source.start();
             const resampledBuffer = await offlineCtx.startRendering();
 
-            // 3. Конвертируем звук в 16-битные целые числа (PCM Int16)
             const floatData = resampledBuffer.getChannelData(0);
             const int16Data = new Int16Array(floatData.length);
             for (let i = 0; i < floatData.length; i++) {
@@ -260,22 +262,18 @@
                 int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
             }
 
-            // 4. Отправляем звук порциями (чанками) по 120 семплов (240 байт) - максимум для BLE MTU
             const CHUNK_SIZE = 120; 
             for (let i = 0; i < int16Data.length; i += CHUNK_SIZE) {
                 const chunk = int16Data.slice(i, i + CHUNK_SIZE);
                 try {
                     await rxCharacteristic.writeValueWithoutResponse(chunk.buffer);
-                    // Задержка 7мс совпадает со скоростью воспроизведения 120 семплов на 16кГц
                     await new Promise(r => setTimeout(r, 7)); 
                 } catch(e) {
-                    console.error("Ошибка при отправке аудио:", e);
                     break;
                 }
             }
         }
 
-        // Утилиты для подготовки WAV
         function createWavBlob(samples, sampleRate) {
             const buffer = new ArrayBuffer(44 + samples.length * 2);
             const view = new DataView(buffer);
@@ -299,9 +297,7 @@
         }
 
         function writeString(view, offset, string) {
-            for (let i = 0; i < string.length; i++) {
-                view.setUint8(offset + i, string.charCodeAt(i));
-            }
+            for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
         }
 
         function blobToBase64(blob) {
