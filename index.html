@@ -83,6 +83,7 @@
             elVolValue.innerText = Math.round(elVolSlider.value * 100) + '%';
         });
 
+        // Блок подключения по Bluetooth (не менялся с версии 5.3)
         elConnect.addEventListener('click', async () => {
             try {
                 elStatus.innerText = "Поиск ESP32...";
@@ -159,12 +160,10 @@
             elRecord.disabled = true;
             elRecord.classList.add('recording');
             
-            // Изменили текст кнопки на 10 секунд
             elRecord.innerText = "Идет запись... Говорите! (10 сек)";
             elOut.value = "Запись звука...";
             elAiOut.value = "Ожидание...";
 
-            // Изменили таймер ожидания на 10000 мс (10 секунд)
             setTimeout(processRecording, 10000);
         });
 
@@ -212,7 +211,6 @@
                     body: JSON.stringify({
                         contents: [{
                             parts: [
-                                // Здесь мы просим нейросеть давать длинные ответы
                                 { text: "Ответь на эту аудиозапись. Твой ответ должен состоять из двух частей. Сначала напиши 'РАСПОЗНАНО:' и текст, который ты услышал. Затем с новой строки напиши 'ОТВЕТ:' и свой ответ. Отвечай развернуто и интересно, используя 2-3 полных предложения, чтобы я мог оценить звучание твоего голоса." },
                                 { inlineData: { mimeType: "audio/wav", data: b64Audio } }
                             ]
@@ -343,3 +341,12 @@
         }
 
         function convertToBase64(blobObj) {
+            return new Promise((res) => {
+                const fr = new FileReader();
+                fr.onloadend = () => res(fr.result.split(',')[1]);
+                fr.readAsDataURL(blobObj);
+            });
+        }
+    </script>
+</body>
+</html>
