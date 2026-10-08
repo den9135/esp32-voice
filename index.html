@@ -24,7 +24,7 @@
     </style>
 </head>
 <body>
-    <div class="version-badge">v5.5 (Синхронизация)</div>
+    <div class="version-badge">v5.9 (Громкость до 250%)</div>
     <div class="card">
         <h2>ESP32 AI Doll - Voice Loop</h2>
 
@@ -40,15 +40,17 @@
         
         <div class="vol-label">
             <span>Громкость куклы:</span>
-            <span id="volValue">30%</span>
+            <span id="volValue">100%</span>
         </div>
-        <input type="range" id="volSlider" min="0" max="1" step="0.05" value="0.3">
+        <!-- Расширили диапазон от 0 до 2.5 (250%), шаг 0.1, старт на 1.0 (100%) -->
+        <input type="range" id="volSlider" min="0" max="2.5" step="0.1" value="1.0">
 
         <button id="btnTestSpeaker" class="btn-test" disabled>🎵 Тест динамика</button>
         
         <label>Индикатор микрофона:</label>
         <div class="meter-bg"><div class="meter-fill" id="meter"></div></div>
 
+        <button id="btnDisabled" disabled style="display:none"></button>
         <button id="btnRecord" disabled>2. Начать запись (10 сек)</button>
 
         <h3>1. Ваш голос:</h3>
@@ -79,8 +81,9 @@
         const elVolSlider = document.getElementById('volSlider');
         const elVolValue = document.getElementById('volValue');
 
+        // Пересчет процентов для нового диапазона ползунка (до 2.5 = 250%)
         elVolSlider.addEventListener('input', () => {
-            elVolValue.innerText = Math.round(elVolSlider.value * 100) + '%';
+            elVolValue.innerText = Math.round((elVolSlider.value / 2.5) * 100) + '%';
         });
 
         elConnect.addEventListener('click', async () => {
@@ -299,7 +302,8 @@
             const currentVol = parseFloat(elVolSlider.value);
             
             for (let i = 0; i < floats.length; i++) {
-                let v = Math.max(-1, Math.min(1, floats[i])) * currentVol;
+                let v = floats[i] * currentVol;
+                v = Math.max(-1, Math.min(1, v));
                 ints[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
             }
 
@@ -316,15 +320,12 @@
 
                 // --- УМНАЯ СИНХРОНИЗАЦИЯ ---
                 const chunksSent = (idx + packSize) / packSize;
-                // Считаем, сколько времени должно было пройти (минус 150мс запаса для ESP32)
                 const targetTime = startTime + (chunksSent * 7.5) - 150; 
                 
                 const now = performance.now();
                 if (now < targetTime) {
-                    // Если браузер убегает вперед, заставляем его подождать
                     await new Promise(r => setTimeout(r, targetTime - now));
                 } else {
-                    // Если отстает - пропускаем такт
                     await new Promise(r => setTimeout(r, 1)); 
                 }
             }
