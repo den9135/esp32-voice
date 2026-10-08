@@ -24,7 +24,7 @@
     </style>
 </head>
 <body>
-    <div class="version-badge">v5.6 (Макс громкость)</div>
+    <div class="version-badge">v5.7 (Исправлено)</div>
     <div class="card">
         <h2>ESP32 AI Doll - Voice Loop</h2>
 
@@ -42,7 +42,6 @@
             <span>Громкость куклы:</span>
             <span id="volValue">100%</span>
         </div>
-        <!-- Увеличили шкалу ползунка до 2.5 (250% громкости) -->
         <input type="range" id="volSlider" min="0" max="2.5" step="0.1" value="1.0">
 
         <button id="btnTestSpeaker" class="btn-test" disabled>🎵 Тест динамика</button>
@@ -266,7 +265,7 @@
                                 
                                 const sysAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
                                 const decodedSnd = await sysAudioCtx.decodeAudioData(bytes.buffer);
-                                 буфер
+                                
                                 await streamAudioBuffer(decodedSnd);
                                 elAiOut.value += "\n[Успешно озвучено!]";
                             }
@@ -300,7 +299,6 @@
             const currentVol = parseFloat(elVolSlider.value);
             
             for (let i = 0; i < floats.length; i++) {
-                // Умножаем на коэффициент (теперь до 2.5x) с защитой от перегрузки
                 let v = floats[i] * currentVol;
                 v = Math.max(-1, Math.min(1, v));
                 ints[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
@@ -353,13 +351,6 @@
             return new Blob([view], { type: 'audio/wav' });
         }
 
-        function convertToBase64(blobObj) {
-            return new Promise((res) => {
-                const fr = new FileReader();
-                fr.onloadend = () => res(fr.result.split(',')[1]);
-                fr.readAsDataURL(blobObj);
-            });
-        }
     </script>
 </body>
 </html>
