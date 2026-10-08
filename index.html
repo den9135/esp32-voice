@@ -9,7 +9,7 @@
         .card { background: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
         h2 { margin-top: 0; color: #32d74b; font-size: 20px; }
         h3 { font-size: 16px; margin: 15px 0 5px 0; color: #e5e5ea; }
-        .version-badge { position: absolute; top: 20px; right: 20px; background: #32d74b; color: #000; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        .version-badge { position: absolute; top: 20px; right: 20px; background: #0a84ff; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
         button { width: 100%; padding: 14px; margin: 8px 0; border: none; border-radius: 8px; background: #0a84ff; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:disabled { background: #444; cursor: not-allowed; }
         button.recording { background: #ff453a; }
@@ -24,7 +24,7 @@
     </style>
 </head>
 <body>
-    <div class="version-badge">v5.2 (С ползунком)</div>
+    <div class="version-badge">v5.3 (Синхронизация)</div>
     <div class="card">
         <h2>ESP32 AI Doll - Voice Loop</h2>
 
@@ -79,7 +79,6 @@
         const elVolSlider = document.getElementById('volSlider');
         const elVolValue = document.getElementById('volValue');
 
-        // Обновление цифр громкости при движении ползунка
         elVolSlider.addEventListener('input', () => {
             elVolValue.innerText = Math.round(elVolSlider.value * 100) + '%';
         });
@@ -296,7 +295,6 @@
             const floats = resampled.getChannelData(0);
             const ints = new Int16Array(floats.length);
             
-            // Берем текущее значение громкости прямо с ползунка перед отправкой
             const currentVol = parseFloat(elVolSlider.value);
             
             for (let i = 0; i < floats.length; i++) {
@@ -304,15 +302,21 @@
                 ints[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
             }
 
+            // Пакет 120 сэмплов = 240 байт. Это ровно 7.5 миллисекунд аудио.
             const packSize = 120; 
             for (let idx = 0; idx < ints.length; idx += packSize) {
                 const packet = ints.slice(idx, idx + packSize);
                 try {
                     await charRX.writeValueWithoutResponse(packet.buffer);
-                    await new Promise(r => setTimeout(r, 7)); 
+                    
+                    // АГРЕССИВНАЯ ОТПРАВКА:
+                    // Говорим браузеру спать всего 2 мс. 
+                    // Так как в пакете 7.5 мс звука, мы забрасываем данные быстрее, чем они играют.
+                    // Излишки будут копиться в кольцевом буфере ESP32 и играть плавно!
+                    await new Promise(r => setTimeout(r, 2)); 
                 } catch(e) {
-                    console.error("Ошибка BLE:", e);
-                    break;
+                    // Если Bluetooth перегрузился от нашей скорости, даем ему микро-передышку
+                    await new Promise(r => setTimeout(r, 10));
                 }
             }
         }
