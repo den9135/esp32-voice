@@ -7,9 +7,9 @@
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #121212; color: #fff; max-width: 480px; margin: 0 auto; position: relative; }
         .card { background: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
-        h2 { margin-top: 0; color: #ff453a; font-size: 20px; }
+        h2 { margin-top: 0; color: #32d74b; font-size: 20px; }
         h3 { font-size: 16px; margin: 15px 0 5px 0; color: #e5e5ea; }
-        .version-badge { position: absolute; top: 20px; right: 20px; background: #ff453a; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        .version-badge { position: absolute; top: 20px; right: 20px; background: #32d74b; color: #000; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
         button { width: 100%; padding: 14px; margin: 8px 0; border: none; border-radius: 8px; background: #0a84ff; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:disabled { background: #444; cursor: not-allowed; }
         button.recording { background: #ff453a; }
@@ -22,12 +22,15 @@
     </style>
 </head>
 <body>
-    <div class="version-badge">v4.5 (Красный)</div>
+    <div class="version-badge">v5.0 (Google API)</div>
     <div class="card">
         <h2>ESP32 AI Doll - Voice Loop</h2>
 
-        <label for="apiKey">API Ключ:</label>
-        <input type="password" id="apiKey" placeholder="Вставьте ключ...">
+        <label for="apiKey">Ключ Gemini (Нейросеть):</label>
+        <input type="password" id="apiKey" placeholder="Вставьте ключ Gemini...">
+
+        <label for="ttsApiKey">Ключ Google Cloud (Голос):</label>
+        <input type="password" id="ttsApiKey" placeholder="Вставьте ключ Google Cloud TTS...">
 
         <div class="status" id="status">Статус: Отключено</div>
         
@@ -63,6 +66,7 @@
         const elOut = document.getElementById('output');
         const elAiOut = document.getElementById('aiOutput');
         const elKey = document.getElementById('apiKey');
+        const elTtsKey = document.getElementById('ttsApiKey');
 
         elConnect.addEventListener('click', async () => {
             try {
@@ -105,35 +109,30 @@
             }
         }
 
+        // Тест динамика отправляет чистый синусоидальный сигнал
         elTest.addEventListener('click', async () => {
             elTest.disabled = true;
             elAiOut.value = "Отправка тестового звука на ESP32...";
             
-            const aCtx = new (window.AudioContext || window.webkitAudioContext)();
             const rate = 16000;
             const dur = 0.5;
-            const buf = aCtx.createBuffer(1, rate * dur, rate);
-            const channel = buf.getChannelData(0);
-            for (let i = 0; i < channel.length; i++) {
-                channel[i] = Math.sin(2 * Math.PI * 440 * (i / rate)); 
+            const ints = new Int16Array(rate * dur);
+            
+            for (let i = 0; i < ints.length; i++) {
+                let v = Math.sin(2 * Math.PI * 440 * (i / rate)) * 0.3; // Громкость 30%
+                ints[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
             }
             
-            const offCtx = new OfflineAudioContext(1, rate * dur, rate);
-            const src = offCtx.createBufferSource();
-            src.buffer = buf;
-            src.connect(offCtx.destination);
-            src.start();
-            const rendered = await offCtx.startRendering();
-            
-            await sendAudioToBoard(rendered);
+            await streamRawPCM(ints);
             elAiOut.value = "Тестовый звук отправлен.";
             elTest.disabled = false;
         });
 
         elRecord.addEventListener('click', () => {
             const key = elKey.value.trim();
-            if (!key) {
-                alert("Введите API ключ!");
+            const ttsKey = elTtsKey.value.trim();
+            if (!key || !ttsKey) {
+                alert("Введите оба API ключа!");
                 return;
             }
             if (isRec) return;
@@ -180,11 +179,14 @@
 
         async function queryGeminiAPI(b64Audio) {
             let key = elKey.value.replace(/['"\s\u200B-\u200D\uFEFF]/g, '');
+            let ttsKey = elTtsKey.value.replace(/['"\s\u200B-\u200D\uFEFF]/g, '');
+            
             elOut.value = "Распознавание...";
             elAiOut.value = "Генерация ответа...";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${key}`;
 
             try {
+                // 1. Отправляем голос в Gemini
                 const req = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -216,46 +218,45 @@
                         elAiOut.value = finalAnswer;
                     }
 
+                    // 2. Отправляем текст в Google Cloud TTS API
                     if (finalAnswer.length > 0) {
-                        elAiOut.value += "\n\n[Поиск сервера озвучки...]";
+                        elAiOut.value += "\n\n[Запрос к Google Cloud TTS...]";
                         try {
-                            const googleTTS = `https://translate.googleapis.com/translate_tts?client=gtx&ie=UTF-8&tl=ru&q=${encodeURIComponent(finalAnswer)}`;
+                            const ttsUrl = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${ttsKey}`;
+                            const ttsReq = await fetch(ttsUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    input: { text: finalAnswer },
+                                    // Используем премиальный голос Wavenet
+                                    voice: { languageCode: 'ru-RU', name: 'ru-RU-Wavenet-D' },
+                                    // LINEAR16 16000Hz - это идеальный сырой формат для нашего ESP32
+                                    audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: 16000 }
+                                })
+                            });
+
+                            if (!ttsReq.ok) {
+                                const errData = await ttsReq.json();
+                                throw new Error(errData.error?.message || "HTTP " + ttsReq.status);
+                            }
+
+                            const ttsData = await ttsReq.json();
                             
-                            // Каскадный массив серверов - если один заблокирован, пробуем следующий
-                            const proxyServers = [
-                                `https://corsproxy.io/?${encodeURIComponent(googleTTS)}`,
-                                `https://thingproxy.freeboard.io/fetch/${googleTTS}`,
-                                `https://api.allorigins.win/raw?url=${encodeURIComponent(googleTTS)}`
-                            ];
-
-                            let audioBytes = null;
-                            let lastError = "";
-
-                            for (let proxyUrl of proxyServers) {
-                                try {
-                                    const ttsReq = await fetch(proxyUrl);
-                                    if (ttsReq.ok) {
-                                        audioBytes = await ttsReq.arrayBuffer();
-                                        elAiOut.value += "\n[Сервер найден. Передача...]";
-                                        break; 
-                                    }
-                                } catch(err) {
-                                    lastError = err.message;
-                                    // Тихо переходим к следующему прокси
+                            if (ttsData.audioContent) {
+                                // Распаковываем Base64 напрямую в байты для I2S усилителя
+                                const binaryString = window.atob(ttsData.audioContent);
+                                const len = binaryString.length;
+                                const bytes = new Uint8Array(len);
+                                for (let i = 0; i < len; i++) {
+                                    bytes[i] = binaryString.charCodeAt(i);
                                 }
+                                
+                                const pcm16Data = new Int16Array(bytes.buffer);
+                                await streamRawPCM(pcm16Data);
+                                elAiOut.value += "\n[Успешно озвучено!]";
                             }
-
-                            if (!audioBytes) {
-                                throw new Error("Все сервера заблокированы: " + lastError);
-                            }
-                            
-                            const sysAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                            const decodedSnd = await sysAudioCtx.decodeAudioData(audioBytes);
-                            
-                            await sendAudioToBoard(decodedSnd);
-                            elAiOut.value += "\n[Успешно озвучено и передано!]";
                         } catch(err) {
-                            elAiOut.value += "\n[Ошибка озвучки: " + err.message + "]";
+                            elAiOut.value += "\n[Ошибка Google TTS: " + err.message + "]";
                         }
                     }
                 } else {
@@ -268,33 +269,24 @@
             }
         }
 
-        async function sendAudioToBoard(audioBuffer) {
-            if (!charRX || !audioBuffer) return;
-            const targetRate = 16000;
-            const oCtx = new OfflineAudioContext(1, audioBuffer.duration * targetRate, targetRate);
-            const bufferSource = oCtx.createBufferSource();
-            bufferSource.buffer = audioBuffer;
-            bufferSource.connect(oCtx.destination);
-            bufferSource.start();
-            const resampled = await oCtx.startRendering();
-
-            const floats = resampled.getChannelData(0);
-            const ints = new Int16Array(floats.length);
+        // Новая функция отправки: минует декодер браузера, звук остается чистым
+        async function streamRawPCM(pcm16Data) {
+            if (!charRX || !pcm16Data) return;
             
-            // Фильтр громкости: 30% мощности для чистого звука без перегруза
+            // Настройка громкости (0.0 до 1.0)
             const volume = 0.3; 
             
-            for (let i = 0; i < floats.length; i++) {
-                let v = Math.max(-1, Math.min(1, floats[i])) * volume;
-                ints[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
+            for (let i = 0; i < pcm16Data.length; i++) {
+                pcm16Data[i] = Math.round(pcm16Data[i] * volume);
             }
 
-            const packSize = 120; 
-            for (let idx = 0; idx < ints.length; idx += packSize) {
-                const packet = ints.slice(idx, idx + packSize);
+            // Отправляем чанками по 120 байт (60 сэмплов)
+            const packSize = 60; 
+            for (let idx = 0; idx < pcm16Data.length; idx += packSize) {
+                const packet = pcm16Data.slice(idx, idx + packSize);
                 try {
                     await charRX.writeValueWithoutResponse(packet.buffer);
-                    // Оптимизированный тайминг для устранения заиканий
+                    // Задержка 6 мс для плавного потока
                     await new Promise(r => setTimeout(r, 6)); 
                 } catch(e) {
                     console.error("Ошибка BLE:", e);
