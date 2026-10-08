@@ -22,7 +22,7 @@
     </style>
 </head>
 <body>
-    <div class="version-badge">v5.0 (Google API)</div>
+    <div class="version-badge">v5.1 (Чистый звук)</div>
     <div class="card">
         <h2>ESP32 AI Doll - Voice Loop</h2>
 
@@ -109,21 +109,22 @@
             }
         }
 
-        // Тест динамика отправляет чистый синусоидальный сигнал
+        // Тест динамика теперь тоже проходит через правильный фильтр
         elTest.addEventListener('click', async () => {
             elTest.disabled = true;
             elAiOut.value = "Отправка тестового звука на ESP32...";
             
             const rate = 16000;
             const dur = 0.5;
-            const ints = new Int16Array(rate * dur);
+            const aCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const buf = aCtx.createBuffer(1, rate * dur, rate);
+            const channel = buf.getChannelData(0);
             
-            for (let i = 0; i < ints.length; i++) {
-                let v = Math.sin(2 * Math.PI * 440 * (i / rate)) * 0.3; // Громкость 30%
-                ints[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
+            for (let i = 0; i < channel.length; i++) {
+                channel[i] = Math.sin(2 * Math.PI * 440 * (i / rate));
             }
             
-            await streamRawPCM(ints);
+            await streamAudioBuffer(buf);
             elAiOut.value = "Тестовый звук отправлен.";
             elTest.disabled = false;
         });
@@ -186,7 +187,6 @@
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${key}`;
 
             try {
-                // 1. Отправляем голос в Gemini
                 const req = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -218,7 +218,6 @@
                         elAiOut.value = finalAnswer;
                     }
 
-                    // 2. Отправляем текст в Google Cloud TTS API
                     if (finalAnswer.length > 0) {
                         elAiOut.value += "\n\n[Запрос к Google Cloud TTS...]";
                         try {
@@ -228,9 +227,7 @@
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
                                     input: { text: finalAnswer },
-                                    // Используем премиальный голос Wavenet
                                     voice: { languageCode: 'ru-RU', name: 'ru-RU-Wavenet-D' },
-                                    // LINEAR16 16000Hz - это идеальный сырой формат для нашего ESP32
                                     audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: 16000 }
                                 })
                             });
@@ -243,16 +240,17 @@
                             const ttsData = await ttsReq.json();
                             
                             if (ttsData.audioContent) {
-                                // Распаковываем Base64 напрямую в байты для I2S усилителя
+                                // Распаковываем Base64 и поручаем браузеру очистить звук от системных заголовков
                                 const binaryString = window.atob(ttsData.audioContent);
-                                const len = binaryString.length;
-                                const bytes = new Uint8Array(len);
-                                for (let i = 0; i < len; i++) {
+                                const bytes = new Uint8Array(binaryString.length);
+                                for (let i = 0; i < binaryString.length; i++) {
                                     bytes[i] = binaryString.charCodeAt(i);
                                 }
                                 
-                                const pcm16Data = new Int16Array(bytes.buffer);
-                                await streamRawPCM(pcm16Data);
+                                const sysAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                                const decodedSnd = await sysAudioCtx.decodeAudioData(bytes.buffer);
+                                
+                                await streamAudioBuffer(decodedSnd);
                                 elAiOut.value += "\n[Успешно озвучено!]";
                             }
                         } catch(err) {
@@ -269,25 +267,35 @@
             }
         }
 
-        // Новая функция отправки: минует декодер браузера, звук остается чистым
-        async function streamRawPCM(pcm16Data) {
-            if (!charRX || !pcm16Data) return;
+        // Правильный аудиоконвейер: защита от хрипов и заиканий
+        async function streamAudioBuffer(audioBuffer) {
+            if (!charRX || !audioBuffer) return;
+            const targetRate = 16000;
+            const oCtx = new OfflineAudioContext(1, audioBuffer.duration * targetRate, targetRate);
+            const bufferSource = oCtx.createBufferSource();
+            bufferSource.buffer = audioBuffer;
+            bufferSource.connect(oCtx.destination);
+            bufferSource.start();
+            const resampled = await oCtx.startRendering();
+
+            const floats = resampled.getChannelData(0);
+            const ints = new Int16Array(floats.length);
             
-            // Настройка громкости (0.0 до 1.0)
+            // Аппаратная защита от хрипа: снижаем громкость цифрового сигнала до 30%
             const volume = 0.3; 
             
-            for (let i = 0; i < pcm16Data.length; i++) {
-                pcm16Data[i] = Math.round(pcm16Data[i] * volume);
+            for (let i = 0; i < floats.length; i++) {
+                let v = Math.max(-1, Math.min(1, floats[i])) * volume;
+                ints[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
             }
 
-            // Отправляем чанками по 120 байт (60 сэмплов)
-            const packSize = 60; 
-            for (let idx = 0; idx < pcm16Data.length; idx += packSize) {
-                const packet = pcm16Data.slice(idx, idx + packSize);
+            const packSize = 120; // 60 сэмплов за раз
+            for (let idx = 0; idx < ints.length; idx += packSize) {
+                const packet = ints.slice(idx, idx + packSize);
                 try {
                     await charRX.writeValueWithoutResponse(packet.buffer);
-                    // Задержка 6 мс для плавного потока
-                    await new Promise(r => setTimeout(r, 6)); 
+                    // Задержка 7мс стабилизирует поток Bluetooth
+                    await new Promise(r => setTimeout(r, 7)); 
                 } catch(e) {
                     console.error("Ошибка BLE:", e);
                     break;
