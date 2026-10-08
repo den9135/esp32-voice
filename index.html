@@ -9,7 +9,7 @@
         .card { background: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
         h2 { margin-top: 0; color: #32d74b; font-size: 20px; }
         h3 { font-size: 16px; margin: 15px 0 5px 0; color: #e5e5ea; }
-        .version-badge { position: absolute; top: 20px; right: 20px; background: #30d158; color: #000; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        .version-badge { position: absolute; top: 20px; right: 20px; background: #ff375f; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
         button { width: 100%; padding: 14px; margin: 8px 0; border: none; border-radius: 8px; background: #0a84ff; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:disabled { background: #444; cursor: not-allowed; }
         button.recording { background: #ff453a; }
@@ -24,7 +24,7 @@
     </style>
 </head>
 <body>
-    <div class="version-badge">v5.7 (Исправлено)</div>
+    <div class="version-badge">v5.5 (Синхронизация)</div>
     <div class="card">
         <h2>ESP32 AI Doll - Voice Loop</h2>
 
@@ -40,9 +40,9 @@
         
         <div class="vol-label">
             <span>Громкость куклы:</span>
-            <span id="volValue">100%</span>
+            <span id="volValue">30%</span>
         </div>
-        <input type="range" id="volSlider" min="0" max="2.5" step="0.1" value="1.0">
+        <input type="range" id="volSlider" min="0" max="1" step="0.05" value="0.3">
 
         <button id="btnTestSpeaker" class="btn-test" disabled>🎵 Тест динамика</button>
         
@@ -80,7 +80,7 @@
         const elVolValue = document.getElementById('volValue');
 
         elVolSlider.addEventListener('input', () => {
-            elVolValue.innerText = Math.round((elVolSlider.value / 2.5) * 100) + '%';
+            elVolValue.innerText = Math.round(elVolSlider.value * 100) + '%';
         });
 
         elConnect.addEventListener('click', async () => {
@@ -299,12 +299,11 @@
             const currentVol = parseFloat(elVolSlider.value);
             
             for (let i = 0; i < floats.length; i++) {
-                let v = floats[i] * currentVol;
-                v = Math.max(-1, Math.min(1, v));
+                let v = Math.max(-1, Math.min(1, floats[i])) * currentVol;
                 ints[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
             }
 
-            const packSize = 120; 
+            const packSize = 120; // 7.5 мс звука
             const startTime = performance.now();
 
             for (let idx = 0; idx < ints.length; idx += packSize) {
@@ -315,13 +314,17 @@
                     await new Promise(r => setTimeout(r, 10)); 
                 }
 
+                // --- УМНАЯ СИНХРОНИЗАЦИЯ ---
                 const chunksSent = (idx + packSize) / packSize;
+                // Считаем, сколько времени должно было пройти (минус 150мс запаса для ESP32)
                 const targetTime = startTime + (chunksSent * 7.5) - 150; 
                 
                 const now = performance.now();
                 if (now < targetTime) {
+                    // Если браузер убегает вперед, заставляем его подождать
                     await new Promise(r => setTimeout(r, targetTime - now));
                 } else {
+                    // Если отстает - пропускаем такт
                     await new Promise(r => setTimeout(r, 1)); 
                 }
             }
@@ -351,6 +354,13 @@
             return new Blob([view], { type: 'audio/wav' });
         }
 
+        function convertToBase64(blobObj) {
+            return new Promise((res) => {
+                const fr = new FileReader();
+                fr.onloadend = () => res(fr.result.split(',')[1]);
+                fr.readAsDataURL(blobObj);
+            });
+        }
     </script>
 </body>
 </html>
