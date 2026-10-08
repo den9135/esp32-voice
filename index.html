@@ -9,7 +9,7 @@
         .card { background: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
         h2 { margin-top: 0; color: #32d74b; font-size: 20px; }
         h3 { font-size: 16px; margin: 15px 0 5px 0; color: #e5e5ea; }
-        .version-badge { position: absolute; top: 20px; right: 20px; background: #0a84ff; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        .version-badge { position: absolute; top: 20px; right: 20px; background: #9d4edd; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
         button { width: 100%; padding: 14px; margin: 8px 0; border: none; border-radius: 8px; background: #0a84ff; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:disabled { background: #444; cursor: not-allowed; }
         button.recording { background: #ff453a; }
@@ -17,14 +17,14 @@
         .status { font-weight: bold; margin: 10px 0; color: #aaa; font-size: 14px; word-break: break-all; }
         .meter-bg { background: #333; height: 18px; border-radius: 9px; overflow: hidden; margin: 10px 0; border: 1px solid #444; }
         .meter-fill { background: #30d158; height: 100%; width: 0%; transition: width 0.05s linear; }
-        textarea { width: 100%; height: 100px; border-radius: 8px; border: 1px solid #444; background: #2c2c2e; color: #fff; padding: 10px; box-sizing: border-box; font-size: 15px; resize: none; }
+        textarea { width: 100%; height: 120px; border-radius: 8px; border: 1px solid #444; background: #2c2c2e; color: #fff; padding: 10px; box-sizing: border-box; font-size: 15px; resize: none; }
         input[type="password"] { width: 100%; padding: 10px; margin: 5px 0 15px 0; border-radius: 6px; border: 1px solid #444; background: #2c2c2e; color: #fff; box-sizing: border-box; font-size: 14px; }
         input[type="range"] { width: 100%; margin: 10px 0 20px 0; accent-color: #0a84ff; }
         .vol-label { display: flex; justify-content: space-between; font-weight: bold; font-size: 14px; color: #aaa; }
     </style>
 </head>
 <body>
-    <div class="version-badge">v5.3 (Синхронизация)</div>
+    <div class="version-badge">v5.4 (Длинные ответы)</div>
     <div class="card">
         <h2>ESP32 AI Doll - Voice Loop</h2>
 
@@ -49,7 +49,7 @@
         <label>Индикатор микрофона:</label>
         <div class="meter-bg"><div class="meter-fill" id="meter"></div></div>
 
-        <button id="btnRecord" disabled>2. Начать запись (5 сек)</button>
+        <button id="btnRecord" disabled>2. Начать запись (10 сек)</button>
 
         <h3>1. Ваш голос:</h3>
         <textarea id="output" readonly placeholder="Здесь появится распознанный текст..."></textarea>
@@ -158,11 +158,14 @@
             audioChunks = [];
             elRecord.disabled = true;
             elRecord.classList.add('recording');
-            elRecord.innerText = "Идет запись... Говорите! (5 сек)";
+            
+            // Изменили текст кнопки на 10 секунд
+            elRecord.innerText = "Идет запись... Говорите! (10 сек)";
             elOut.value = "Запись звука...";
             elAiOut.value = "Ожидание...";
 
-            setTimeout(processRecording, 5000);
+            // Изменили таймер ожидания на 10000 мс (10 секунд)
+            setTimeout(processRecording, 10000);
         });
 
         async function processRecording() {
@@ -182,7 +185,7 @@
             if (samples16.length === 0) {
                 elOut.value = "Ошибка: Нет звука с микрофона.";
                 elRecord.disabled = false;
-                elRecord.innerText = "2. Начать запись (5 сек)";
+                elRecord.innerText = "2. Начать запись (10 сек)";
                 return;
             }
 
@@ -191,7 +194,7 @@
             await queryGeminiAPI(b64);
 
             elRecord.disabled = false;
-            elRecord.innerText = "2. Начать запись (5 сек)";
+            elRecord.innerText = "2. Начать запись (10 сек)";
         }
 
         async function queryGeminiAPI(b64Audio) {
@@ -209,7 +212,8 @@
                     body: JSON.stringify({
                         contents: [{
                             parts: [
-                                { text: "Ответь на эту аудиозапись. Твой ответ должен состоять из двух частей. Сначала напиши 'РАСПОЗНАНО:' и текст, который ты услышал. Затем с новой строки напиши 'ОТВЕТ:' и свой ответ. Отвечай кратко, парой слов." },
+                                // Здесь мы просим нейросеть давать длинные ответы
+                                { text: "Ответь на эту аудиозапись. Твой ответ должен состоять из двух частей. Сначала напиши 'РАСПОЗНАНО:' и текст, который ты услышал. Затем с новой строки напиши 'ОТВЕТ:' и свой ответ. Отвечай развернуто и интересно, используя 2-3 полных предложения, чтобы я мог оценить звучание твоего голоса." },
                                 { inlineData: { mimeType: "audio/wav", data: b64Audio } }
                             ]
                         }]
@@ -302,20 +306,13 @@
                 ints[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
             }
 
-            // Пакет 120 сэмплов = 240 байт. Это ровно 7.5 миллисекунд аудио.
             const packSize = 120; 
             for (let idx = 0; idx < ints.length; idx += packSize) {
                 const packet = ints.slice(idx, idx + packSize);
                 try {
                     await charRX.writeValueWithoutResponse(packet.buffer);
-                    
-                    // АГРЕССИВНАЯ ОТПРАВКА:
-                    // Говорим браузеру спать всего 2 мс. 
-                    // Так как в пакете 7.5 мс звука, мы забрасываем данные быстрее, чем они играют.
-                    // Излишки будут копиться в кольцевом буфере ESP32 и играть плавно!
                     await new Promise(r => setTimeout(r, 2)); 
                 } catch(e) {
-                    // Если Bluetooth перегрузился от нашей скорости, даем ему микро-передышку
                     await new Promise(r => setTimeout(r, 10));
                 }
             }
@@ -346,12 +343,3 @@
         }
 
         function convertToBase64(blobObj) {
-            return new Promise((res) => {
-                const fr = new FileReader();
-                fr.onloadend = () => res(fr.result.split(',')[1]);
-                fr.readAsDataURL(blobObj);
-            });
-        }
-    </script>
-</body>
-</html>
